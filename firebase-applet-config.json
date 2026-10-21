@@ -1,0 +1,12 @@
+{
+  "projectId": "signalbloom-prototype",
+  "appId": "1:872307839531:web:ac38cf8d5792b0d55d106e",
+  "apiKey": "AIzaSyDWYYJRZTfO623t-HF8gRNgI6pxz6XgbBY",
+  "authDomain": "signalbloom-prototype.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-signalbloom-13704540-65f5-413e-a7b9-adda4bc10874",
+  "storageBucket": "signalbloom-prototype.firebasestorage.app",
+  "messagingSenderId": "872307839531",
+  "measurementId": "",
+  "oAuthClientId": "872307839531-pk1o50ik66ei0j9e24fbttkm9eipdrsj.apps.googleusercontent.com",
+  "recaptchaSiteKey": ""
+}

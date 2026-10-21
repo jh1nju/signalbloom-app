@@ -1,0 +1,186 @@
+{
+  "entities": {
+    "Signal": {
+      "title": "Signal",
+      "description": "A detected market, technology, or competitive signal.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the signal."
+        },
+        "title": {
+          "type": "string",
+          "description": "Brief headline of the signal.",
+          "maxLength": 200
+        },
+        "summary": {
+          "type": "string",
+          "description": "Concise summary of the signal observation.",
+          "maxLength": 1000
+        },
+        "category": {
+          "type": "string",
+          "description": "Industry or technology domain.",
+          "enum": ["AI & Agents", "Developer Tools", "Enterprise SaaS", "Fintech", "Security", "CleanTech", "BioTech"]
+        },
+        "source": {
+          "type": "string",
+          "description": "Source or publication name.",
+          "maxLength": 100
+        },
+        "sourceUrl": {
+          "type": "string",
+          "description": "Reference URL.",
+          "maxLength": 500
+        },
+        "impact": {
+          "type": "string",
+          "description": "Assessed market impact level.",
+          "enum": ["High", "Medium", "Low"]
+        },
+        "urgency": {
+          "type": "string",
+          "description": "Time-horizon urgency.",
+          "enum": ["Immediate", "Near-term", "Long-term"]
+        },
+        "velocity": {
+          "type": "number",
+          "description": "Signal velocity or growth rate score (0-100)."
+        },
+        "sentiment": {
+          "type": "string",
+          "description": "Market sentiment vibe.",
+          "enum": ["Bullish", "Neutral", "Cautious", "Volatile"]
+        },
+        "tags": {
+          "type": "array",
+          "description": "Key topical tags."
+        },
+        "upvotes": {
+          "type": "number",
+          "description": "Community or user upvote count."
+        },
+        "authorId": {
+          "type": "string",
+          "description": "ID of the user who contributed or validated the signal."
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of contributor.",
+          "maxLength": 100
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when signal was recorded."
+        }
+      },
+      "required": ["title", "category", "impact", "urgency", "createdAt"]
+    },
+    "Bloom": {
+      "title": "Bloom",
+      "description": "A synthesized strategic opportunity or product thesis derived from multiple signals.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the bloom."
+        },
+        "title": {
+          "type": "string",
+          "description": "Strategic thesis title.",
+          "maxLength": 200
+        },
+        "thesis": {
+          "type": "string",
+          "description": "Core thesis statement.",
+          "maxLength": 1500
+        },
+        "targetMarket": {
+          "type": "string",
+          "description": "Target addressable market segment.",
+          "maxLength": 300
+        },
+        "recommendedAction": {
+          "type": "string",
+          "description": "Strategic next move.",
+          "maxLength": 600
+        },
+        "signalIds": {
+          "type": "array",
+          "description": "Associated signal IDs that formed this bloom."
+        },
+        "status": {
+          "type": "string",
+          "description": "Status of the bloom thesis.",
+          "enum": ["Draft", "Validated", "In Action", "Archived"]
+        },
+        "authorId": {
+          "type": "string",
+          "description": "Creator user UID."
+        },
+        "authorEmail": {
+          "type": "string",
+          "description": "Creator email.",
+          "maxLength": 120
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp."
+        }
+      },
+      "required": ["title", "thesis", "status", "createdAt"]
+    },
+    "Watchlist": {
+      "title": "Watchlist",
+      "description": "A curated user collection of signals and alerts.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Watchlist ID."
+        },
+        "name": {
+          "type": "string",
+          "description": "Watchlist name.",
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of the watchlist scope.",
+          "maxLength": 500
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Owner user ID."
+        },
+        "signalIds": {
+          "type": "array",
+          "description": "Pinned signal IDs."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp created."
+        }
+      },
+      "required": ["name", "ownerId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/signals/{signalId}": {
+      "schema": "Signal",
+      "description": "Market and technology signals tracked across industry segments."
+    },
+    "/blooms/{bloomId}": {
+      "schema": "Bloom",
+      "description": "Synthesized strategic opportunity briefs and product theses."
+    },
+    "/watchlists/{watchlistId}": {
+      "schema": "Watchlist",
+      "description": "User watchlists and curated signal collections."
+    }
+  }
+}

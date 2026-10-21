@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all unknown paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Health / connection test document required by AI Studio skill
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Global helper primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'kusalsahasrakacool@gmail.com'
+      );
+    }
+
+    // Validation for Signals
+    function isValidSignal(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.category is string && data.category.size() <= 50
+        && data.impact is string && data.impact in ['High', 'Medium', 'Low']
+        && data.urgency is string && data.urgency in ['Immediate', 'Near-term', 'Long-term']
+        && (!('summary' in data) || (data.summary is string && data.summary.size() <= 1000))
+        && (!('source' in data) || (data.source is string && data.source.size() <= 100))
+        && (!('sourceUrl' in data) || (data.sourceUrl is string && data.sourceUrl.size() <= 500))
+        && (!('velocity' in data) || (data.velocity is number))
+        && (!('sentiment' in data) || (data.sentiment is string && data.sentiment in ['Bullish', 'Neutral', 'Cautious', 'Volatile']))
+        && (!('upvotes' in data) || (data.upvotes is number))
+        && (!('tags' in data) || (data.tags is list && data.tags.size() <= 12));
+    }
+
+    match /signals/{signalId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(signalId) && isValidSignal(request.resource.data);
+      allow update: if isSignedIn() && isValidId(signalId) && (
+        // Allow upvote action
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes'])
+        ||
+        // Author or admin full edit
+        ((isOwner(resource.data.authorId) || isAdmin()) && isValidSignal(request.resource.data))
+      );
+      allow delete: if isSignedIn() && isValidId(signalId) && (isOwner(resource.data.authorId) || isAdmin());
+    }
+
+    // Validation for Blooms (Strategic Thesis)
+    function isValidBloom(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.thesis is string && data.thesis.size() > 0 && data.thesis.size() <= 1500
+        && data.status is string && data.status in ['Draft', 'Validated', 'In Action', 'Archived']
+        && (!('targetMarket' in data) || (data.targetMarket is string && data.targetMarket.size() <= 300))
+        && (!('recommendedAction' in data) || (data.recommendedAction is string && data.recommendedAction.size() <= 600))
+        && (!('signalIds' in data) || (data.signalIds is list && data.signalIds.size() <= 20));
+    }
+
+    match /blooms/{bloomId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidId(bloomId) && isValidBloom(request.resource.data) && request.resource.data.authorId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(bloomId) && isValidBloom(request.resource.data) && (isOwner(resource.data.authorId) || isAdmin());
+      allow delete: if isSignedIn() && isValidId(bloomId) && (isOwner(resource.data.authorId) || isAdmin());
+    }
+
+    // Validation for User Watchlists
+    function isValidWatchlist(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.ownerId is string && data.ownerId == request.auth.uid
+        && (!('description' in data) || (data.description is string && data.description.size() <= 500))
+        && (!('signalIds' in data) || (data.signalIds is list && data.signalIds.size() <= 100));
+    }
+
+    match /watchlists/{watchlistId} {
+      allow read: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(watchlistId) && isValidWatchlist(request.resource.data);
+      allow update: if isSignedIn() && isValidId(watchlistId) && isValidWatchlist(request.resource.data) && resource.data.ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(watchlistId) && resource.data.ownerId == request.auth.uid;
+    }
+  }
+}
