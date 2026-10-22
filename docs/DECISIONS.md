@@ -17,3 +17,15 @@ Context: Windows ping counts an "unreachable" reply from the router as a receive
 Options: follow Windows; count it as lost.
 Choice: count it as lost.
 Reason: following Windows would under-report outages, for example showing 25% loss instead of 50%.
+
+## D-004: How often devices are checked
+Context: a full scan of the network (254 addresses) takes up to 30 seconds, but SPEC AC-07 needs an offline device to show within one minute.
+Options: full scan every 5 minutes; full scan every 60 seconds; full scan every 5 minutes plus a quick recheck of known devices.
+Choice: full scan every 5 minutes to find new devices, plus a quick ping of known devices on every cycle.
+Reason: meets AC-07 without flooding the network with a full scan every minute.
+
+## D-005: When a device counts as online
+Context: Windows PCs block ping by default, but ARP table entries can stay for minutes after a device leaves.
+Options: ping only; ping or ARP; ping for devices that answer it, ARP for devices that never do.
+Choice: devices that have ever answered ping are judged by ping, and go offline after 2 missed checks in a row. Devices that never answer ping use the ARP table.
+Reason: avoids false "offline" alerts for firewalled PCs (reducing alert fatigue is a core goal in the proposal), while devices that answer ping still show offline quickly.
