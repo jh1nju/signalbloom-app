@@ -23,6 +23,7 @@ Context: a full scan of the network (254 addresses) takes up to 30 seconds, but 
 Options: full scan every 5 minutes; full scan every 60 seconds; full scan every 5 minutes plus a quick recheck of known devices.
 Choice: full scan every 5 minutes to find new devices, plus a quick ping of known devices on every cycle.
 Reason: meets AC-07 without flooding the network with a full scan every minute.
+Result: known devices are rechecked every 20 seconds, so two misses take about 40 seconds; AC-07 met (tested with a phone on 23 Oct).
 
 ## D-005: When a device counts as online
 Context: Windows PCs block ping by default, but ARP table entries can stay for minutes after a device leaves.
