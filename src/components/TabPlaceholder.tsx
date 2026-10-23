@@ -9,11 +9,11 @@ interface TabPlaceholderProps {
 
 export const TabPlaceholder: React.FC<TabPlaceholderProps> = ({ tab, currentSite }) => {
   const Icon = tab.icon;
-  const siteName = currentSite ? currentSite.name : 'Selected Clinic';
+  const siteName = currentSite ? currentSite.name : 'Selected site';
 
   return (
     <div className="glass-panel p-6 sm:p-10 flex-1 overflow-y-auto">
-      {/* Active Location pill */}
+      {/* Active location pill */}
       <div className="mb-6">
         <span
           className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
@@ -27,13 +27,13 @@ export const TabPlaceholder: React.FC<TabPlaceholderProps> = ({ tab, currentSite
             className="w-1.5 h-1.5 rounded-full"
             style={{ background: 'var(--accent-mint)' }}
           />
-          <span>Active Location: {siteName}</span>
+          <span>Active location: {siteName}</span>
         </span>
       </div>
 
-      {/* Meta Label */}
+      {/* Meta label */}
       <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500 mb-1">
-        Monitoring Interface
+        Monitoring interface
       </p>
 
       {/* Title */}
@@ -55,7 +55,7 @@ export const TabPlaceholder: React.FC<TabPlaceholderProps> = ({ tab, currentSite
         }}
       >
         <div
-          className="w-16 h-16 rounded-[20px] bg-white flex items-center justify-center mb-6 shadow-sm"
+          className="w-16 h-16 rounded-[20px] bg-white flex items-center justify-center mb-6 shadow-xs"
           style={{
             color: 'var(--accent-ocean)',
             boxShadow: '0 10px 20px rgba(0, 0, 0, 0.05)',

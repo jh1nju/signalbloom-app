@@ -7,6 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { Sidebar, TABS, TabId } from './components/Sidebar';
 import { TopBar, SiteOption } from './components/TopBar';
 import { TabPlaceholder } from './components/TabPlaceholder';
+import { NetworkHealthTab } from './components/NetworkHealthTab';
 import { DevApiTest } from './components/DevApiTest';
 import { Terminal } from 'lucide-react';
 
@@ -110,13 +111,20 @@ export default function App() {
             onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
           />
 
-          {/* Content Area */}
-          <TabPlaceholder tab={activeTabItem} currentSite={activeSite} />
+          {/* Tab Content View */}
+          {currentTab === 'health' ? (
+            <NetworkHealthTab
+              siteId={selectedSiteId}
+              siteName={activeSite?.name || 'Selected site'}
+            />
+          ) : (
+            <TabPlaceholder tab={activeTabItem} currentSite={activeSite} />
+          )}
         </main>
       </div>
 
-      {/* Dev helper pill (Hidden in production) */}
-      {!isProd && (
+      {/* Dev helper pill (Strictly hidden when NODE_ENV is production) */}
+      {!isProd && process.env.NODE_ENV !== 'production' && (
         <button
           onClick={() => {
             window.history.pushState({}, '', '/dev/api-test');

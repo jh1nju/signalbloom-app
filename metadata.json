@@ -1,6 +1,6 @@
 {
   "name": "SignalBloom",
-  "description": "Simple, plain-English network health, security, and device monitoring for New Zealand dental clinics.",
+  "description": "Simple, plain-English network health, security, and device monitoring for small businesses.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

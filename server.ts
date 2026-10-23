@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { agentRouter } from './src/api/agent.ts';
 import { appShellRouter } from './src/api/appShell.ts';
+import { healthRouter } from './src/api/health.ts';
 
 dotenv.config();
 
@@ -12,10 +13,17 @@ app.use(express.json({ limit: '10mb' }));
 // Mount API routes
 app.use('/api', agentRouter);
 app.use('/api', appShellRouter);
+app.use('/api', healthRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
+});
+
+// Serve public static assets
+app.use(express.static('public'));
+app.get('/favicon.ico', (req, res) => {
+  res.redirect(301, '/assets/aistudio/signalbloom-logo_af397f27.png');
 });
 
 // Mount Vite middleware for dev server

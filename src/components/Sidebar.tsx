@@ -5,23 +5,23 @@ import {
   Laptop, 
   Sparkles, 
   Settings, 
-  X,
-  Radio
+  X
 } from 'lucide-react';
+import { SignalBloomLogo } from './SignalBloomLogo';
 
 export type TabId = 'health' | 'security' | 'devices' | 'ai' | 'settings';
 
 export interface TabItem {
   id: TabId;
   label: string;
-  icon: React.ComponentType<{ className?: string; width?: number; height?: number; strokeWidth?: number }>;
+  icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   description: string;
 }
 
 export const TABS: TabItem[] = [
   {
     id: 'health',
-    label: 'Network Health',
+    label: 'Network health',
     icon: Activity,
     description: 'Overall health score, connection speed, response time, and trend graphs for your internet line.',
   },
@@ -35,19 +35,19 @@ export const TABS: TabItem[] = [
     id: 'devices',
     label: 'Devices',
     icon: Laptop,
-    description: "An inventory of every computer, printer, phone, and equipment connected to this clinic's network.",
+    description: "An inventory of every computer, printer, phone, and equipment connected to this site's network.",
   },
   {
     id: 'ai',
-    label: 'AI Assistant',
+    label: 'AI assistant',
     icon: Sparkles,
     description: 'Plain-English explanations of network problems, prioritised recommendations, and troubleshooting chat.',
   },
   {
     id: 'settings',
-    label: 'Account & Settings',
+    label: 'Account & settings',
     icon: Settings,
-    description: 'Clinic locations, one-time agent setup codes, staff user permissions, and email alert preferences.',
+    description: 'Site locations, one-time agent setup codes, staff user permissions, and email alert preferences.',
   },
 ];
 
@@ -82,26 +82,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
       >
         <div className="flex flex-col flex-1">
-          {/* Sidebar Header */}
+          {/* Sidebar Header with blue-to-green flower logo and SignalBloom text only */}
           <div className="p-6 border-b border-black/[0.05] flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div
-                className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0"
-                style={{
-                  background: 'var(--gradient)',
-                  boxShadow: '0 4px 12px rgba(11, 79, 168, 0.2)',
-                }}
-              >
-                <Radio className="w-5 h-5" strokeWidth={2.5} />
+              <div className="shrink-0 drop-shadow-xs">
+                <SignalBloomLogo size={36} />
               </div>
-              <div className="min-w-0">
-                <span className="font-bold text-[1.1rem] tracking-tight block text-slate-900 leading-tight">
-                  SignalBloom
-                </span>
-                <span className="font-mono text-[10px] uppercase text-slate-500/70 tracking-wider block">
-                  Office Network Manager
-                </span>
-              </div>
+              <span className="font-bold text-[1.2rem] tracking-tight text-slate-900">
+                SignalBloom
+              </span>
             </div>
 
             {/* Mobile close button */}
@@ -114,7 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
-          {/* Navigation Items */}
+          {/* Navigation Items (Sentence Case) */}
           <nav className="p-3 flex-1 space-y-1">
             {TABS.map((tab) => {
               const Icon = tab.icon;
@@ -152,16 +141,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
               );
             })}
           </nav>
-        </div>
-
-        {/* Sidebar Footer */}
-        <div className="p-5 bg-white/30 border-t border-black/[0.05] rounded-b-[15px]">
-          <p className="font-mono text-[10px] uppercase text-slate-500/70 tracking-wider">
-            Dental Clinic Network
-          </p>
-          <p className="text-[11px] font-medium text-slate-700 mt-0.5">
-            Designed for office managers
-          </p>
         </div>
       </aside>
     </>
