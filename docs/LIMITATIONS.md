@@ -9,3 +9,5 @@
 - The dashboard currently runs on sample data. Real agent data replaces it once the app is published.
 - Alerts use fixed thresholds, not a learned baseline. Anomaly detection (Isolation Forest) is future work.
 - Dev-only tools (sample data generator, Simulate fault) are switched off and their routes are not available in production.
+- AI explanations depend on the Gemini API's availability and quota. When it's unavailable, a rule-based explanation is shown instead.
+- The app uses the Gemini API free tier (500 requests a day per model). Heavier use would need a paid key.

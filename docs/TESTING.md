@@ -19,3 +19,9 @@
 | 2026-10-23 | Alerts group instead of repeating | Pass | During the fault the repeat count increased and no duplicate alerts appeared |
 | 2026-10-23 | Alerts resolve by themselves | Pass | Alerts cleared after the fault ended. The score stayed low for about 12 more minutes because of the 15-minute window, which led to the change to 5 minutes (D-012) |
 | 2026-10-23 | No new-device alerts for known devices | Pass | Security tab showed no "New device joined" alerts for the sample devices |
+| 2026-10-23 | AI unavailable: alert fallback | Pass | With the Gemini quota used up, alert cards showed "Basic explanation (AI unavailable)" built from the alert reason |
+| 2026-10-23 | AI unavailable: chat fallback | Pass | The AI Assistant showed "The AI assistant is busy right now" instead of an error |
+| 2026-10-23 | No retry storm | Pass | Failed explanations were retried on the backoff schedule, one log line per attempt |
+| 2026-10-23 | Devices tab | Pass | Summary counts match the table; All/Online/Offline filters work; cards at phone width |
+| 2026-10-23 | Empty state for a new site | Pass | New Office (no agent) shows Connect this site with a valid setup code; a new code can be created |
+| 2026-10-23 | Real AI explanations after the model switch | Pass | Simulate fault produced a real AI explanation; the chat answered "Why is my internet slow?" |

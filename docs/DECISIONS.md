@@ -89,3 +89,20 @@ Context: when an agent first connects, every device on the network is new to Sig
 Options: alert on every unknown device; treat the first scan as the starting list.
 Choice: devices found in a site's first 10 minutes after the agent registers are marked as known with no alert. After that, each newly seen device raises one "New device joined" warning and is then marked known.
 Reason: the alert keeps its value (an unexpected device on an office network is worth knowing about) without a burst of false alarms at setup.
+
+## D-016: Which Gemini model the app uses and what it sees
+Context: alert explanations and the AI Assistant need fast, short, plain answers, and every call counts against an API quota separate from the AI Studio plan.
+Options: a top model for best quality; a Flash model for speed and cost.
+Choice: gemini-3.5-flash-lite, with gemini-3.1-flash-lite as the fallback on 503 or 429, using exact model names (no -latest aliases). Gemini is called only from the backend, so the key never reaches the browser. It receives only a short site summary (score, its parts, open alerts, offline devices, latest readings), never customer names, emails or tokens.
+Reason: short explanations don't need a top model, Flash answers fast enough for a live dashboard, and sending only a summary keeps customer data private (Privacy Act 2020) and the answers grounded in facts. On the free tier these allow 500 requests a day each, against 20 for Gemini 3.8 Flash, which ran out during testing.
+
+## D-017: What happens when the AI is unavailable
+Context: during testing Gemini returned 503 (high demand), then the free tier's limit of 20 requests a day ran out in minutes because every alert was retried every 15 seconds.
+Options: keep retrying; show an error; back off and fall back to a rule-based explanation.
+Choice: explanations are generated only when an alert card is shown, then saved and reused (regenerated only if the alert's severity changes). Failed alerts back off (30 s, 1 min, 2 min, 5 min, then every 10 min). While no AI explanation exists, the card shows "Basic explanation (AI unavailable)" built from the alert's own reason. A 402 (no prepaid credits) also shows this fallback. The chat retries once after 3 seconds, then says the assistant is busy.
+Reason: the dashboard always explains a problem, even when Gemini is down, and the quota isn't burned by retries.
+
+## D-018: What a site shows before its agent connects
+Context: a new site has no data, and a blank dashboard would confuse a non-technical user.
+Choice: Network Health and Devices show a "Connect this site" card with three steps and the site's setup code (with a button for a new 24-hour code). Once the agent registers, it shows "Waiting for the first readings" until data arrives.
+Reason: onboarding is guided on the screen the user is already looking at, which answers the open onboarding question in SPEC.md.
