@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { agentRouter } from './src/api/agent.ts';
 import { appShellRouter } from './src/api/appShell.ts';
 import { healthRouter } from './src/api/health.ts';
+import { devicesRouter } from './src/api/devices.ts';
 
 dotenv.config();
 
@@ -14,6 +15,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use('/api', agentRouter);
 app.use('/api', appShellRouter);
 app.use('/api', healthRouter);
+app.use('/api', devicesRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

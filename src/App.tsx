@@ -8,6 +8,7 @@ import { Sidebar, TABS, TabId } from './components/Sidebar';
 import { TopBar, SiteOption } from './components/TopBar';
 import { TabPlaceholder } from './components/TabPlaceholder';
 import { NetworkHealthTab } from './components/NetworkHealthTab';
+import { DevicesTab } from './components/DevicesTab';
 import { DevApiTest } from './components/DevApiTest';
 import { Terminal } from 'lucide-react';
 
@@ -114,6 +115,11 @@ export default function App() {
           {/* Tab Content View */}
           {currentTab === 'health' ? (
             <NetworkHealthTab
+              siteId={selectedSiteId}
+              siteName={activeSite?.name || 'Selected site'}
+            />
+          ) : currentTab === 'devices' ? (
+            <DevicesTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
             />
