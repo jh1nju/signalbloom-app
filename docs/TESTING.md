@@ -25,3 +25,9 @@
 | 2026-10-23 | Devices tab | Pass | Summary counts match the table; All/Online/Offline filters work; cards at phone width |
 | 2026-10-23 | Empty state for a new site | Pass | New Office (no agent) shows Connect this site with a valid setup code; a new code can be created |
 | 2026-10-23 | Real AI explanations after the model switch | Pass | Simulate fault produced a real AI explanation; the chat answered "Why is my internet slow?" |
+| 2026-10-23 | Approve fix: buttons and confirmation | Pass | After Simulate fault, a device recommendation showed both buttons; Approve fix asked for confirmation, then showed Waiting for the agent |
+| 2026-10-23 | Approve fix: status updates | Pass | Simulate agent result moved the card to Running, then Done, with the agent's message |
+| 2026-10-23 | Approve fix: no duplicates | Pass | A second approval for the same device and type was blocked while one was pending |
+| 2026-10-23 | Activity log | Pass | The approval and the result appeared in Account & Settings, newest first |
+| 2026-10-24 | Approved fix clears the demo fault | Pass | With the fake cloud: fault on, fix queued, agent logged DEMO FAULT OFF and the demo_fault file was removed |
+| 2026-10-24 | Failed fix keeps the demo fault | Pass | A fix for a made-up MAC failed and the fault stayed on |

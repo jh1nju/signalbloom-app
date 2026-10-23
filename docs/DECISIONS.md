@@ -64,7 +64,7 @@ Reason: temporary cloud problems are retried, but a request the cloud says is wr
 ## D-011: How the demo fault works
 Context: the demo needs a network problem on cue, so the audience can see SignalBloom detect it, explain it and recover.
 Options: restart the agent with a flag; a switch that works while the agent is running; a separate fault simulator.
-Choice: --demo-fault starts the agent with the fault on, and creating or deleting a file named demo_fault in data_dir turns it on or off within 30 seconds without a restart. While on, latency rises by 300 ms and packet loss by 20 percentage points (capped at 100). Off by default.
+Choice: --demo-fault starts the agent with the fault on, and creating or deleting a file named demo_fault in data_dir turns it on or off within 30 seconds without a restart. While on, latency rises by 300 ms and packet loss by 20 percentage points (capped at 100). Off by default. When an approved fix succeeds while the demo fault is on, the agent turns the fault off, so the demo shows the network recovering after the fix. A failed fix leaves the fault on.
 Reason: the fault can start at the right moment in the demo. Readings carry no demo marker, so the cloud reacts exactly as it would to a real problem.
 
 ## D-012: How the health score is calculated
@@ -106,3 +106,9 @@ Reason: the dashboard always explains a problem, even when Gemini is down, and t
 Context: a new site has no data, and a blank dashboard would confuse a non-technical user.
 Choice: Network Health and Devices show a "Connect this site" card with three steps and the site's setup code (with a button for a new 24-hour code). Once the agent registers, it shows "Waiting for the first readings" until data arrives.
 Reason: onboarding is guided on the screen the user is already looking at, which answers the open onboarding question in SPEC.md.
+
+## D-019: How a user approves a fix
+Context: the proposal promises one-click fixes, but users must stay in control (customer choice between manual and approved AI actions) and every automated action must be accountable.
+Options: fix automatically; one-click fix without confirmation; offer both a manual choice and an approved fix with confirmation.
+Choice: each AI recommendation with a device action shows "I'll do it myself" and "Approve fix". Approving asks for confirmation, then queues a command the agent picks up. The card shows the status (waiting, running, done or didn't work) with the agent's message. Only one pending fix per device and type is allowed. Every approval, manual choice and result is written to the audit log and shown in Account & Settings as an Activity log. Fixes are labelled "Simulated in this prototype".
+Reason: the user always decides, nothing runs twice, and the Activity log gives the approval and audit record the proposal's Accountability value calls for.

@@ -21,3 +21,6 @@
 | 2026-10-23 | Claude (claude.ai chat) | AI Assistant system instructions and playground test plan; diagnosis of the 503 and 429 errors; the backoff, fallback and on-demand designs | Chose Flash for the app, the fallback behaviour and on-demand generation |
 | 2026-10-23 | Google AI Studio (Gemini 4 Argon) | Devices tab, empty state and New Office site, model switch, 402 handling | Tested each in the preview |
 | 2026-10-23 | Claude (claude.ai chat) | Devices and empty-state prompts; diagnosis of the 402 error; Flash Lite recommendation from the rate-limit page | Chose the free-tier key and the Flash Lite models |
+| 2026-10-23 | Google AI Studio (Gemini 4 Argon) | Approve-fix buttons, fix status, duplicate check, audit logging, Activity log, dev Simulate agent result | Ran each approve-fix check in the preview |
+| 2026-10-23 | Claude (claude.ai chat) | Approve-fix prompt and checks; spotted that the demo fault would block recovery and wrote the agent change prompt | Chose to clear the fault only on a successful fix |
+| 2026-10-24 | Claude Code | Agent change: an approved fix clears the demo fault, with tests | Ran all tests and the live check against the fake cloud |
