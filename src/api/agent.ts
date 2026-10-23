@@ -12,6 +12,7 @@ import {
   auditLog,
 } from '../db/schema.ts';
 import { formatDeviceFriendlyName } from '../services/geminiService.ts';
+import { clearSimulatedFaultOnApprovedFix } from '../services/alertEngine.ts';
 
 export const agentRouter = Router();
 
@@ -389,6 +390,10 @@ agentRouter.post(
             message: message || null,
           },
         });
+      }
+
+      if (status === 'succeeded') {
+        clearSimulatedFaultOnApprovedFix(agent.siteId);
       }
 
       return res.status(200).json({ recorded: true });

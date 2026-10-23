@@ -1,6 +1,11 @@
 import { db } from '../db/index.ts';
 import { agents, alerts, devices, metricSamples, settings, sites } from '../db/schema.ts';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import {
+  DEMO_FAULT_CLEARED_LOG,
+  defaultDemoFaultController,
+  DemoFaultLogger,
+} from './demoFault.ts';
 
 export interface AlertThresholds {
   delay_warning_ms: number;
@@ -41,15 +46,47 @@ export function getSimulatedFaultStatus(siteId: string): {
   remainingSeconds: number;
 } {
   const until = simulatedFaults.get(siteId);
-  if (!until || Date.now() >= until) {
-    if (until) simulatedFaults.delete(siteId);
-    return { active: false, expiresAt: null, remainingSeconds: 0 };
+  if (until && Date.now() < until) {
+    return {
+      active: true,
+      expiresAt: new Date(until).toISOString(),
+      remainingSeconds: Math.max(0, Math.ceil((until - Date.now()) / 1000)),
+    };
   }
-  return {
-    active: true,
-    expiresAt: new Date(until).toISOString(),
-    remainingSeconds: Math.max(0, Math.ceil((until - Date.now()) / 1000)),
-  };
+  if (until) {
+    simulatedFaults.delete(siteId);
+  }
+  if (defaultDemoFaultController.isActive()) {
+    return {
+      active: true,
+      expiresAt: null,
+      remainingSeconds: 30,
+    };
+  }
+  return { active: false, expiresAt: null, remainingSeconds: 0 };
+}
+
+export function clearSimulatedFaultOnApprovedFix(
+  siteId?: string,
+  logger: DemoFaultLogger = { info: (msg: string) => console.log(msg) }
+): boolean {
+  let siteFaultWasActive = false;
+  if (siteId) {
+    const until = simulatedFaults.get(siteId);
+    if (until && Date.now() < until) {
+      siteFaultWasActive = true;
+    }
+    simulatedFaults.delete(siteId);
+  }
+
+  const controllerCleared = defaultDemoFaultController.clearOnApprovedFix();
+
+  if (siteFaultWasActive && !controllerCleared) {
+    logger.info(DEMO_FAULT_CLEARED_LOG);
+    return true;
+  }
+
+  return controllerCleared;
 }
 
 export function getAllSimulatedFaults(): Record<

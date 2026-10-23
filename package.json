@@ -12,7 +12,8 @@
     "lint": "tsc --noEmit",
     "seed": "tsx src/db/seed.ts",
     "seed:sample": "tsx src/db/seedSampleData.ts",
-    "clean:sample": "tsx src/db/cleanSampleData.ts"
+    "clean:sample": "tsx src/db/cleanSampleData.ts",
+    "test": "tsx --test src/services/__tests__/demoFault.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

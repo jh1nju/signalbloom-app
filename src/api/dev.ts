@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.ts';
 import { agents, auditLog, commands, devices, setupCodes, sites } from '../db/schema.ts';
 import {
+  clearSimulatedFaultOnApprovedFix,
   getAllSimulatedFaults,
   getSimulatedFaultStatus,
   startSimulatedFault,
@@ -184,8 +185,12 @@ devRouter.post('/simulate-agent-result', async (req: Request, res: Response) => 
       });
     }
 
+    // 5. Turn off demo/simulated fault if active
+    const demoFaultCleared = clearSimulatedFaultOnApprovedFix(pendingCmd.siteId);
+
     return res.status(200).json({
       recorded: true,
+      demo_fault_cleared: demoFaultCleared,
       simulated_result: {
         command_id: pendingCmd.id,
         site_id: pendingCmd.siteId,
