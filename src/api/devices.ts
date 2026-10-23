@@ -5,9 +5,20 @@ import { eq, asc } from 'drizzle-orm';
 
 export const devicesRouter = Router();
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // GET /api/sites/:siteId/devices
 devicesRouter.get('/sites/:siteId/devices', async (req: Request, res: Response) => {
   const { siteId } = req.params;
+
+  if (!siteId || !UUID_REGEX.test(siteId)) {
+    return res.status(400).json({
+      error: {
+        code: 'invalid_site_id',
+        message: 'A valid site ID is required.',
+      },
+    });
+  }
 
   try {
     const siteDevices = await db

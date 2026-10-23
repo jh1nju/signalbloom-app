@@ -6,6 +6,7 @@ import { appShellRouter } from './src/api/appShell.ts';
 import { healthRouter } from './src/api/health.ts';
 import { devicesRouter } from './src/api/devices.ts';
 import { alertsRouter } from './src/api/alerts.ts';
+import { aiRouter } from './src/api/ai.ts';
 import { devRouter } from './src/api/dev.ts';
 import { evaluateAlertsForAllSites, runDevSampleTick } from './src/services/alertEngine.ts';
 
@@ -20,6 +21,7 @@ app.use('/api', appShellRouter);
 app.use('/api', healthRouter);
 app.use('/api', devicesRouter);
 app.use('/api', alertsRouter);
+app.use('/api', aiRouter);
 
 // Mount /api/dev/* ONLY when NODE_ENV is not production
 if (process.env.NODE_ENV !== 'production') {

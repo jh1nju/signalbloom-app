@@ -71,13 +71,15 @@ export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
     else setIsRefreshing(true);
 
     try {
-      const res = await fetch(`/api/sites/${siteId}/devices`);
-      if (res.ok) {
-        const json: DevicesResponse = await res.json();
-        setData(json);
+      const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/devices`).catch(() => null);
+      if (res && res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
+        const json: DevicesResponse | null = await res.json().catch(() => null);
+        if (json) {
+          setData(json);
+        }
       }
-    } catch (err) {
-      console.error('Failed to fetch devices:', err);
+    } catch {
+      // Ignore transient network errors during dev server restarts
     } finally {
       setLoading(false);
       setIsRefreshing(false);

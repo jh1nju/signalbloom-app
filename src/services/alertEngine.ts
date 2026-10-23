@@ -237,6 +237,7 @@ async function fireOrUpdateAlert(params: {
   const [existing] = await db.select().from(alerts).where(whereClause).limit(1);
 
   if (existing) {
+    const severityChanged = existing.severity !== severity;
     await db
       .update(alerts)
       .set({
@@ -247,6 +248,11 @@ async function fireOrUpdateAlert(params: {
         lastSeenAt: now,
       })
       .where(eq(alerts.id, existing.id));
+
+    if (severityChanged) {
+      const { invalidateAlertRecommendations } = await import('./geminiService.ts');
+      await invalidateAlertRecommendations(existing.id);
+    }
   } else {
     await db.insert(alerts).values({
       siteId,

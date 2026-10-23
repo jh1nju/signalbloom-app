@@ -47,6 +47,16 @@ interface HealthResponse {
   };
 }
 
+export interface AlertRecommendationItem {
+  id: string;
+  alertId: string;
+  rank: number;
+  explanation: string;
+  actionText: string;
+  commandType: 'restart_device' | 'isolate_device' | 'reconnect_device' | null;
+  targetMac: string | null;
+}
+
 export interface AlertItem {
   id: string;
   siteId: string;
@@ -60,6 +70,10 @@ export interface AlertItem {
   occurrenceCount: number;
   firstSeenAt: string;
   lastSeenAt: string;
+  explanation?: string | null;
+  recommendations?: AlertRecommendationItem[];
+  aiAvailable?: boolean;
+  basicExplanation?: string;
 }
 
 interface AlertsResponse {
@@ -67,8 +81,249 @@ interface AlertsResponse {
   activeHealthAlerts: AlertItem[];
   activeSecurityAlerts: AlertItem[];
   resolvedSecurityAlerts: AlertItem[];
+  aiAvailable?: boolean;
+  aiUnavailableMessage?: string | null;
   lastEvaluatedAt: string;
 }
+
+const COMMAND_LABELS: Record<string, string> = {
+  restart_device: 'Restart device',
+  isolate_device: 'Isolate device',
+  reconnect_device: 'Reconnect device',
+};
+
+export function buildClientBasicExplanation(rule: string, reason: string): string {
+  const cleanReason = (reason || '').trim().replace(/\.+$/, '');
+  let meaning = 'This usually means there is a temporary problem on the network.';
+  if (rule === 'delay') {
+    meaning = 'This usually means the internet connection is overloaded or unstable.';
+  } else if (rule === 'packet_loss') {
+    meaning =
+      'This usually means the internet connection is overloaded or has a faulty cable or Wi-Fi link.';
+  } else if (rule === 'internet_down') {
+    meaning = 'This usually means the router, modem, or internet provider connection is down.';
+  } else if (rule === 'device_offline') {
+    meaning = 'This usually means the device is turned off, unplugged, or out of Wi-Fi range.';
+  } else if (rule === 'new_device') {
+    meaning =
+      'This usually means a new phone, computer, or guest device just connected to your network.';
+  }
+  return cleanReason ? `${cleanReason}. ${meaning}` : meaning;
+}
+
+// Client-side cache of generated explanations & backoff state per alertId:severity
+const clientAlertAiCache = new Map<
+  string,
+  {
+    explanation: string;
+    recommendations: AlertRecommendationItem[];
+  }
+>();
+const clientAlertInFlight = new Map<
+  string,
+  Promise<{
+    explanation: string | null;
+    recommendations: AlertRecommendationItem[];
+    nextRetryAt: number | null;
+  } | null>
+>();
+const clientAlertNextRetryAt = new Map<string, number>();
+
+export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
+  const cacheKey = `${alert.id}:${alert.severity}`;
+  const cached = clientAlertAiCache.get(cacheKey);
+
+  const serverRecs = alert.recommendations ?? [];
+  const serverExplanation = alert.explanation || serverRecs[0]?.explanation || null;
+
+  const [localAi, setLocalAi] = useState<{
+    explanation: string | null;
+    recommendations: AlertRecommendationItem[];
+  }>(() => ({
+    explanation: serverExplanation || cached?.explanation || null,
+    recommendations:
+      serverRecs.length > 0 ? serverRecs : (cached?.recommendations ?? []),
+  }));
+
+  useEffect(() => {
+    if (alert.severity !== 'critical' && alert.severity !== 'warning') {
+      return;
+    }
+
+    const fromServerRecs = alert.recommendations ?? [];
+    const fromServerExp = alert.explanation || fromServerRecs[0]?.explanation || null;
+
+    if (fromServerExp) {
+      clientAlertAiCache.set(cacheKey, {
+        explanation: fromServerExp,
+        recommendations: fromServerRecs,
+      });
+      clientAlertNextRetryAt.delete(cacheKey);
+      setLocalAi({
+        explanation: fromServerExp,
+        recommendations: fromServerRecs,
+      });
+      return;
+    }
+
+    const existingCached = clientAlertAiCache.get(cacheKey);
+    if (existingCached) {
+      setLocalAi(existingCached);
+      return;
+    }
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const triggerExplainWhenAllowed = async () => {
+      if (cancelled) return;
+
+      const stillCached = clientAlertAiCache.get(cacheKey);
+      if (stillCached) {
+        setLocalAi(stillCached);
+        return;
+      }
+
+      const nextRetryAt = clientAlertNextRetryAt.get(cacheKey);
+      if (nextRetryAt && Date.now() < nextRetryAt) {
+        const waitMs = Math.max(1000, nextRetryAt - Date.now());
+        retryTimer = setTimeout(triggerExplainWhenAllowed, waitMs);
+        return;
+      }
+
+      let requestPromise = clientAlertInFlight.get(cacheKey);
+      if (!requestPromise) {
+        requestPromise = (async () => {
+          try {
+            const res = await fetch(
+              `/api/sites/${encodeURIComponent(alert.siteId)}/alerts/${encodeURIComponent(alert.id)}/explain`,
+              { method: 'POST' }
+            );
+            if (!res.ok) return null;
+            const ct = res.headers.get('content-type') || '';
+            if (!ct.includes('application/json')) return null;
+            const json = await res.json();
+            return {
+              explanation: json?.explanation ?? null,
+              recommendations: Array.isArray(json?.recommendations)
+                ? json.recommendations
+                : [],
+              nextRetryAt:
+                typeof json?.nextRetryAt === 'number' ? json.nextRetryAt : null,
+            };
+          } catch {
+            return null;
+          } finally {
+            clientAlertInFlight.delete(cacheKey);
+          }
+        })();
+        clientAlertInFlight.set(cacheKey, requestPromise);
+      }
+
+      const result = await requestPromise;
+      if (cancelled) return;
+
+      if (result?.explanation) {
+        const saved = {
+          explanation: result.explanation,
+          recommendations: result.recommendations,
+        };
+        clientAlertAiCache.set(cacheKey, saved);
+        clientAlertNextRetryAt.delete(cacheKey);
+        setLocalAi(saved);
+      } else {
+        const retryAt = result?.nextRetryAt ?? Date.now() + 30_000;
+        clientAlertNextRetryAt.set(cacheKey, retryAt);
+        const waitMs = Math.max(1000, retryAt - Date.now());
+        retryTimer = setTimeout(triggerExplainWhenAllowed, waitMs);
+      }
+    };
+
+    void triggerExplainWhenAllowed();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [
+    alert.id,
+    alert.siteId,
+    alert.severity,
+    alert.explanation,
+    alert.recommendations,
+    cacheKey,
+  ]);
+
+  if (alert.severity !== 'critical' && alert.severity !== 'warning') {
+    return null;
+  }
+
+  const recs =
+    serverRecs.length > 0 ? serverRecs : localAi.recommendations;
+  const explanation =
+    serverExplanation || localAi.explanation || recs[0]?.explanation || null;
+
+  if (!explanation) {
+    const basicExplanation =
+      alert.basicExplanation || buildClientBasicExplanation(alert.rule, alert.reason);
+    return (
+      <div className="mt-3.5 pt-3.5 border-t border-black/[0.07] space-y-1">
+        <div className="text-xs font-bold text-slate-800">
+          Basic explanation (AI unavailable)
+        </div>
+        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+          {basicExplanation}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3.5 pt-3.5 border-t border-black/[0.07] space-y-3">
+      <div className="space-y-1">
+        <div className="text-xs font-bold text-slate-800">
+          Why this is happening
+        </div>
+        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+          {explanation}
+        </p>
+      </div>
+
+      {recs.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-xs font-bold text-slate-800">
+            What you can do
+          </div>
+          <ol className="space-y-1.5">
+            {recs.map((rec, idx) => (
+              <li
+                key={rec.id || idx}
+                className="text-xs sm:text-sm text-slate-700 bg-white/75 rounded-xl px-3 py-2 border border-black/[0.05] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+              >
+                <div className="flex items-start gap-2">
+                  <span className="font-bold text-slate-500 shrink-0">
+                    {rec.rank || idx + 1}.
+                  </span>
+                  <span>{rec.actionText}</span>
+                </div>
+                {rec.commandType && (
+                  <span className="text-[11px] font-medium text-slate-600 shrink-0">
+                    {COMMAND_LABELS[rec.commandType] || rec.commandType}
+                    {rec.targetMac ? ` · ${rec.targetMac}` : ''}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-500">
+        Suggested by AI. Check before acting.
+      </p>
+    </div>
+  );
+};
 
 interface NetworkHealthTabProps {
   siteId: string;
@@ -123,21 +378,34 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
 
     try {
       const [healthRes, alertsRes] = await Promise.all([
-        fetch(`/api/sites/${siteId}/health`),
-        fetch(`/api/sites/${siteId}/alerts`),
+        fetch(`/api/sites/${encodeURIComponent(siteId)}/health`).catch(() => null),
+        fetch(`/api/sites/${encodeURIComponent(siteId)}/alerts`).catch(() => null),
       ]);
 
-      if (healthRes.ok) {
-        const json: HealthResponse = await healthRes.json();
-        setData(json);
-        setLastRefreshed(new Date());
+      if (
+        healthRes &&
+        healthRes.ok &&
+        (healthRes.headers.get('content-type') || '').includes('application/json')
+      ) {
+        const json: HealthResponse | null = await healthRes.json().catch(() => null);
+        if (json && typeof json.score === 'number') {
+          setData(json);
+          setLastRefreshed(new Date());
+        }
       }
-      if (alertsRes.ok) {
-        const alertsJson: AlertsResponse = await alertsRes.json();
-        setActiveAlerts(alertsJson.activeHealthAlerts ?? []);
+
+      if (
+        alertsRes &&
+        alertsRes.ok &&
+        (alertsRes.headers.get('content-type') || '').includes('application/json')
+      ) {
+        const alertsJson: AlertsResponse | null = await alertsRes.json().catch(() => null);
+        if (alertsJson) {
+          setActiveAlerts(alertsJson.activeHealthAlerts ?? []);
+        }
       }
-    } catch (err) {
-      console.error('Failed to fetch health data:', err);
+    } catch {
+      // Transient network errors during dev server restarts are ignored; next poll recovers
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -309,62 +577,66 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
               return (
                 <div
                   key={alert.id}
-                  className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                  className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-2xs ${
                     isCritical
                       ? 'bg-rose-50/75 border-rose-200/90'
                       : 'bg-amber-50/75 border-amber-200/90'
                   }`}
                 >
-                  <div className="flex items-start gap-3.5">
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                        isCritical
-                          ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                          : 'bg-amber-100 text-amber-700 border border-amber-200'
-                      }`}
-                    >
-                      {isCritical ? (
-                        <AlertOctagon className="w-5 h-5" />
-                      ) : (
-                        <AlertTriangle className="w-5 h-5" />
-                      )}
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                            isCritical
-                              ? 'bg-rose-600 text-white border-rose-700'
-                              : 'bg-amber-500 text-white border-amber-600'
-                          }`}
-                        >
-                          {isCritical ? 'Critical' : 'Warning'}
-                        </span>
-                        <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                          {alert.title}
-                        </h3>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                          isCritical
+                            ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                            : 'bg-amber-100 text-amber-700 border border-amber-200'
+                        }`}
+                      >
+                        {isCritical ? (
+                          <AlertOctagon className="w-5 h-5" />
+                        ) : (
+                          <AlertTriangle className="w-5 h-5" />
+                        )}
                       </div>
 
-                      <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
-                        {alert.reason}
-                      </p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                              isCritical
+                                ? 'bg-rose-600 text-white border-rose-700'
+                                : 'bg-amber-500 text-white border-amber-600'
+                            }`}
+                          >
+                            {isCritical ? 'Critical' : 'Warning'}
+                          </span>
+                          <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                            {alert.title}
+                          </h3>
+                        </div>
+
+                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                          {alert.reason}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 text-xs text-slate-600 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-black/[0.06]">
+                      <span className="inline-flex items-center gap-1.5 font-medium">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Happening for {formatAlertDuration(alert.firstSeenAt)}</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/80 border border-black/[0.08] font-semibold text-slate-700">
+                        <Repeat className="w-3 h-3 text-slate-400" />
+                        <span>
+                          {alert.occurrenceCount}{' '}
+                          {alert.occurrenceCount === 1 ? 'time' : 'times'}
+                        </span>
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 text-xs text-slate-600 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-black/[0.06]">
-                    <span className="inline-flex items-center gap-1.5 font-medium">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Happening for {formatAlertDuration(alert.firstSeenAt)}</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/80 border border-black/[0.08] font-semibold text-slate-700">
-                      <Repeat className="w-3 h-3 text-slate-400" />
-                      <span>
-                        {alert.occurrenceCount}{' '}
-                        {alert.occurrenceCount === 1 ? 'time' : 'times'}
-                      </span>
-                    </span>
-                  </div>
+                  <AlertAiSection alert={alert} />
                 </div>
               );
             })}

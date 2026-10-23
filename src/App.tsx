@@ -10,8 +10,17 @@ import { TabPlaceholder } from './components/TabPlaceholder';
 import { NetworkHealthTab } from './components/NetworkHealthTab';
 import { DevicesTab } from './components/DevicesTab';
 import { SecurityTab } from './components/SecurityTab';
+import { AiAssistantTab } from './components/AiAssistantTab';
 import { DevApiTest } from './components/DevApiTest';
 import { Terminal } from 'lucide-react';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const DEFAULT_SITES: SiteOption[] = [
+  { id: 'f227aede-afcb-40d3-9455-298e461d96ec', name: 'Manukau Clinic', address: '15 Putney Way, Manukau' },
+  { id: 'a4bd5bb9-ef0a-4784-ad16-77b6f261e3dd', name: 'Papatoetoe Clinic', address: '128 St George St, Papatoetoe' },
+  { id: 'e0c18da5-39ab-4fd6-b7a2-182369c64bc4', name: 'Botany Clinic', address: '588 Chapel Rd, Botany' },
+];
 
 export default function App() {
   const isProd = import.meta.env.PROD || process.env.NODE_ENV === 'production';
@@ -20,13 +29,10 @@ export default function App() {
   // Shell state
   const [currentTab, setCurrentTab] = useState<TabId>('health');
   const [organisationName, setOrganisationName] = useState<string>('Demo Dental Group');
-  const [sites, setSites] = useState<SiteOption[]>([
-    { id: 'site-1', name: 'Manukau Clinic', address: '15 Putney Way, Manukau' },
-    { id: 'site-2', name: 'Papatoetoe Clinic', address: '128 St George St, Papatoetoe' },
-    { id: 'site-3', name: 'Botany Clinic', address: '588 Chapel Rd, Botany' },
-  ]);
+  const [sites, setSites] = useState<SiteOption[]>(DEFAULT_SITES);
   const [selectedSiteId, setSelectedSiteId] = useState<string>(() => {
-    return localStorage.getItem('signalbloom_selected_site_id') || '';
+    const stored = localStorage.getItem('signalbloom_selected_site_id') || '';
+    return UUID_REGEX.test(stored) ? stored : DEFAULT_SITES[0].id;
   });
   const [isSampleData, setIsSampleData] = useState<boolean>(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
@@ -43,8 +49,10 @@ export default function App() {
     const fetchShellData = async () => {
       try {
         const res = await fetch('/api/app-shell');
-        if (res.ok) {
-          const data = await res.json();
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (!data) return;
           if (data.organisation?.name) {
             setOrganisationName(data.organisation.name);
           }
@@ -59,8 +67,8 @@ export default function App() {
           }
           setIsSampleData(Boolean(data.sampleData));
         }
-      } catch (err) {
-        console.warn('Could not fetch app-shell bootstrap data:', err);
+      } catch {
+        // Ignore transient network errors during dev server restarts
       }
     };
 
@@ -126,6 +134,11 @@ export default function App() {
             />
           ) : currentTab === 'devices' ? (
             <DevicesTab
+              siteId={selectedSiteId}
+              siteName={activeSite?.name || 'Selected site'}
+            />
+          ) : currentTab === 'ai' ? (
+            <AiAssistantTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
             />

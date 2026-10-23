@@ -8,7 +8,7 @@ import {
   Repeat,
   RefreshCw,
 } from 'lucide-react';
-import { AlertItem, formatAlertDuration } from './NetworkHealthTab';
+import { AlertAiSection, AlertItem, formatAlertDuration } from './NetworkHealthTab';
 
 interface AlertsResponse {
   siteId: string;
@@ -52,14 +52,16 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({ siteId, siteName }) =>
     else setIsRefreshing(true);
 
     try {
-      const res = await fetch(`/api/sites/${siteId}/alerts`);
-      if (res.ok) {
-        const json: AlertsResponse = await res.json();
-        setActiveAlerts(json.activeSecurityAlerts ?? []);
-        setResolvedAlerts(json.resolvedSecurityAlerts ?? []);
+      const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/alerts`).catch(() => null);
+      if (res && res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
+        const json: AlertsResponse | null = await res.json().catch(() => null);
+        if (json) {
+          setActiveAlerts(json.activeSecurityAlerts ?? []);
+          setResolvedAlerts(json.resolvedSecurityAlerts ?? []);
+        }
       }
-    } catch (err) {
-      console.error('Failed to fetch security alerts:', err);
+    } catch {
+      // Ignore transient network errors during dev server restarts
     } finally {
       setLoading(false);
       setIsRefreshing(false);
@@ -160,62 +162,66 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({ siteId, siteName }) =>
               return (
                 <div
                   key={alert.id}
-                  className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                  className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-2xs ${
                     isCritical
                       ? 'bg-rose-50/75 border-rose-200/90'
                       : 'bg-amber-50/75 border-amber-200/90'
                   }`}
                 >
-                  <div className="flex items-start gap-3.5">
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
-                        isCritical
-                          ? 'bg-rose-100 text-rose-700 border border-rose-200'
-                          : 'bg-amber-100 text-amber-700 border border-amber-200'
-                      }`}
-                    >
-                      {isCritical ? (
-                        <AlertOctagon className="w-5 h-5" />
-                      ) : (
-                        <AlertTriangle className="w-5 h-5" />
-                      )}
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span
-                          className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
-                            isCritical
-                              ? 'bg-rose-600 text-white border-rose-700'
-                              : 'bg-amber-500 text-white border-amber-600'
-                          }`}
-                        >
-                          {isCritical ? 'Critical' : 'Warning'}
-                        </span>
-                        <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                          {alert.title}
-                        </h3>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-3.5">
+                      <div
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                          isCritical
+                            ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                            : 'bg-amber-100 text-amber-700 border border-amber-200'
+                        }`}
+                      >
+                        {isCritical ? (
+                          <AlertOctagon className="w-5 h-5" />
+                        ) : (
+                          <AlertTriangle className="w-5 h-5" />
+                        )}
                       </div>
 
-                      <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
-                        {alert.reason}
-                      </p>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                              isCritical
+                                ? 'bg-rose-600 text-white border-rose-700'
+                                : 'bg-amber-500 text-white border-amber-600'
+                            }`}
+                          >
+                            {isCritical ? 'Critical' : 'Warning'}
+                          </span>
+                          <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                            {alert.title}
+                          </h3>
+                        </div>
+
+                        <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                          {alert.reason}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 text-xs text-slate-600 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-black/[0.06]">
+                      <span className="inline-flex items-center gap-1.5 font-medium">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Happening for {formatAlertDuration(alert.firstSeenAt)}</span>
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/80 border border-black/[0.08] font-semibold text-slate-700">
+                        <Repeat className="w-3 h-3 text-slate-400" />
+                        <span>
+                          {alert.occurrenceCount}{' '}
+                          {alert.occurrenceCount === 1 ? 'time' : 'times'}
+                        </span>
+                      </span>
                     </div>
                   </div>
 
-                  <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 text-xs text-slate-600 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-black/[0.06]">
-                    <span className="inline-flex items-center gap-1.5 font-medium">
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Happening for {formatAlertDuration(alert.firstSeenAt)}</span>
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/80 border border-black/[0.08] font-semibold text-slate-700">
-                      <Repeat className="w-3 h-3 text-slate-400" />
-                      <span>
-                        {alert.occurrenceCount}{' '}
-                        {alert.occurrenceCount === 1 ? 'time' : 'times'}
-                      </span>
-                    </span>
-                  </div>
+                  <AlertAiSection alert={alert} />
                 </div>
               );
             })}
