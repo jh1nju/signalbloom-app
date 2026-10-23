@@ -15,3 +15,7 @@
 | 2026-10-23 | Health score weights come from settings | Pass | Changed the uptime weight from 30 to 50; the score changed with no code change; set it back to 30 |
 | 2026-10-23 | Health score per site | Pass | All three sites show a score; the site with worse sample data has the lowest |
 | 2026-10-23 | Network Health at phone width | Pass | Layout fits a phone-sized window with no overflow |
+| 2026-10-23 | Simulated fault raises alerts | Pass | Simulate fault on Botany Clinic: critical delay and packet loss alerts appeared and the score dropped |
+| 2026-10-23 | Alerts group instead of repeating | Pass | During the fault the repeat count increased and no duplicate alerts appeared |
+| 2026-10-23 | Alerts resolve by themselves | Pass | Alerts cleared after the fault ended. The score stayed low for about 12 more minutes because of the 15-minute window, which led to the change to 5 minutes (D-012) |
+| 2026-10-23 | No new-device alerts for known devices | Pass | Security tab showed no "New device joined" alerts for the sample devices |

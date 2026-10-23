@@ -7,3 +7,5 @@
 - The agent was tested against a local fake cloud that follows API.md. It connects to the real cloud app once the app is published in Phase 6.
 - The health score doesn't yet include device load or error rate, because the agent doesn't measure them. The proposal's full score would add these.
 - The dashboard currently runs on sample data. Real agent data replaces it once the app is published.
+- Alerts use fixed thresholds, not a learned baseline. Anomaly detection (Isolation Forest) is future work.
+- Dev-only tools (sample data generator, Simulate fault) are switched off and their routes are not available in production.

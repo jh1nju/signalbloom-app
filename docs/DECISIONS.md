@@ -70,10 +70,22 @@ Reason: the fault can start at the right moment in the demo. Readings carry no d
 ## D-012: How the health score is calculated
 Context: a non-technical office manager needs one number that says whether the network is healthy, but the agent measures several different things.
 Options: show each measurement separately; one score with equal weights; one weighted score with an explanation of what's affecting it.
-Choice: a score from 0 to 100, calculated from the last 15 minutes. Five parts, each scored 0 to 100 between a "zero" and a "full marks" limit: internet uptime (weight 30; full at 100%, zero at 90% or less), delay (25; full at 30 ms or less, zero at 200 ms or more), packet loss (20; full at 0%, zero at 10% or more), internet speed (15; full at 100 Mbps or more, zero at 5 Mbps or less), devices online (10; full when all are online, zero at half or fewer). A part with no data is left out and its weight shared among the others. 80 to 100 is "Healthy", 50 to 79 "Needs attention", below 50 "Problem". Weights and limits are stored in the settings table, not in code. These are starting values for the team to confirm.
-Reason: an outage hurts a business most, then slowness and lost data, so uptime carries the most weight. The "What's affecting your score" list shows which part is pulling the score down, so the number is never a black box.
+Choice: a score from 0 to 100, calculated from the last 5 minutes (score_window_minutes in the settings table). Five parts, each scored 0 to 100 between a "zero" and a "full marks" limit: internet uptime (weight 30; full at 100%, zero at 90% or less), delay (25; full at 30 ms or less, zero at 200 ms or more), packet loss (20; full at 0%, zero at 10% or more), internet speed (15; full at 100 Mbps or more, zero at 5 Mbps or less), devices online (10; full when all are online, zero at half or fewer). A part with no data is left out and its weight shared among the others. 80 to 100 is "Healthy", 50 to 79 "Needs attention", below 50 "Problem". Weights and limits are stored in the settings table, not in code. These are starting values for the team to confirm.
+Reason: an outage hurts a business most, then slowness and lost data, so uptime carries the most weight. The "What's affecting your score" list shows which part is pulling the score down, so the number is never a black box. The window was cut from 15 to 5 minutes after testing showed the score stayed low for about 12 minutes after a fault had cleared, out of step with the alerts.
 
 ## D-013: Plain-English labels
 Context: the users are not technical.
 Choice: the dashboard uses "Internet uptime", "Delay", "Packet loss", "Internet speed" and "Devices online", in sentence case, with the technical term and unit in a tooltip.
 Reason: users understand the screen without IT knowledge, while the technical meaning is one hover away.
+
+## D-014: When an alert is raised and cleared
+Context: alerts must catch real problems without flooding a non-technical user with noise, the main complaint about competitors such as Auvik.
+Options: alert on every bad reading; alert after several bad readings in a row, grouped and auto-resolved.
+Choice: delay (warning above 100 ms, critical above 250 ms) and packet loss (warning above 5%, critical above 15%) must stay bad for 3 readings in a row; internet down is critical after 2; a known device offline for more than 2 minutes is a warning. Only one open alert per site, rule and device: repeats raise its count instead of creating new alerts. An alert resolves itself after 3 normal readings. Each reading is evaluated once, and all thresholds are stored in the settings table.
+Reason: a single blip never raises an alert, repeats don't pile up, and every alert states its reason with the actual numbers, so the user can see why it fired.
+
+## D-015: Which devices count as new
+Context: when an agent first connects, every device on the network is new to SignalBloom, which would flood the Security tab with "New device joined" alerts.
+Options: alert on every unknown device; treat the first scan as the starting list.
+Choice: devices found in a site's first 10 minutes after the agent registers are marked as known with no alert. After that, each newly seen device raises one "New device joined" warning and is then marked known.
+Reason: the alert keeps its value (an unexpected device on an office network is worth knowing about) without a burst of false alarms at setup.
