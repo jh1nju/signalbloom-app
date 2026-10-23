@@ -9,6 +9,7 @@ import {
   Clock,
   Repeat
 } from 'lucide-react';
+import { SiteAgentEmptyState } from './SiteAgentEmptyState';
 
 interface PartResult {
   key: string;
@@ -35,6 +36,10 @@ interface BandwidthPoint {
 
 interface HealthResponse {
   siteId: string;
+  hasRegisteredAgent?: boolean;
+  hasReadings?: boolean;
+  setupCode?: string | null;
+  setupCodeExpiresAt?: string | null;
   score: number;
   statusWord: 'Healthy' | 'Needs attention' | 'Problem';
   statusColor: 'green' | 'amber' | 'red';
@@ -413,14 +418,22 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
   }, [siteId]);
 
   useEffect(() => {
+    setData(null);
+    setActiveAlerts([]);
     fetchHealthData(false);
+  }, [fetchHealthData]);
 
+  const hasRegisteredAgent = data?.hasRegisteredAgent ?? true;
+  const hasReadings = data?.hasReadings ?? true;
+  const pollIntervalMs = !hasRegisteredAgent || !hasReadings ? 10000 : 30000;
+
+  useEffect(() => {
     const interval = setInterval(() => {
       fetchHealthData(true);
-    }, 30000); // 30 seconds refresh without page reload
+    }, pollIntervalMs);
 
     return () => clearInterval(interval);
-  }, [fetchHealthData]);
+  }, [fetchHealthData, pollIntervalMs]);
 
   if (loading && !data) {
     return (
@@ -522,7 +535,7 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
               <span>Active location: {siteName}</span>
             </span>
             <span className="text-[11px] text-slate-500">
-              Auto-refreshes every 30s
+              Auto-refreshes every {pollIntervalMs === 10000 ? '10s' : '30s'}
             </span>
           </div>
 
@@ -546,6 +559,21 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
         </button>
       </div>
 
+      {!hasRegisteredAgent || !hasReadings ? (
+        <SiteAgentEmptyState
+          siteId={siteId}
+          hasRegisteredAgent={hasRegisteredAgent}
+          hasReadings={hasReadings}
+          setupCode={data?.setupCode ?? null}
+          setupCodeExpiresAt={data?.setupCodeExpiresAt ?? null}
+          onCodeCreated={(newCode, expiresAt) => {
+            setData((prev) =>
+              prev ? { ...prev, setupCode: newCode, setupCodeExpiresAt: expiresAt } : prev
+            );
+          }}
+        />
+      ) : (
+        <>
       {/* =================================================================== */}
       {/* ACTIVE ALERTS PANEL AT THE TOP (CRITICAL FIRST) */}
       {/* =================================================================== */}
@@ -988,6 +1016,8 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
 
         </div>
       </div>
+        </>
+      )}
 
     </div>
   );

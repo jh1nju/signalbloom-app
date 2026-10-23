@@ -18,8 +18,9 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 const DEFAULT_SITES: SiteOption[] = [
   { id: 'f227aede-afcb-40d3-9455-298e461d96ec', name: 'Manukau Clinic', address: '15 Putney Way, Manukau' },
-  { id: 'a4bd5bb9-ef0a-4784-ad16-77b6f261e3dd', name: 'Papatoetoe Clinic', address: '128 St George St, Papatoetoe' },
-  { id: 'e0c18da5-39ab-4fd6-b7a2-182369c64bc4', name: 'Botany Clinic', address: '588 Chapel Rd, Botany' },
+  { id: '05d2bf71-f594-4279-9cdd-10c46a3806b0', name: 'Papatoetoe Clinic', address: '128 St George St, Papatoetoe' },
+  { id: '208e42d5-1cfa-474b-805a-a86a532e1b3b', name: 'Botany Clinic', address: '588 Chapel Rd, Botany' },
+  { id: '44444444-4444-4444-4444-444444444444', name: 'New Office (no agent)', address: '42 Queen Street, Auckland CBD 1010' },
 ];
 
 export default function App() {

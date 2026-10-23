@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Laptop, RefreshCw } from 'lucide-react';
+import { SiteAgentEmptyState } from './SiteAgentEmptyState';
 
 interface DeviceItem {
   id: string;
@@ -18,6 +19,10 @@ interface DeviceItem {
 
 interface DevicesResponse {
   siteId: string;
+  hasRegisteredAgent?: boolean;
+  hasReadings?: boolean;
+  setupCode?: string | null;
+  setupCodeExpiresAt?: string | null;
   summary: {
     total: number;
     online: number;
@@ -87,11 +92,18 @@ export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
   }, [siteId]);
 
   useEffect(() => {
+    setData(null);
     fetchDevices(false);
+  }, [fetchDevices]);
 
+  const hasRegisteredAgent = data?.hasRegisteredAgent ?? true;
+  const hasReadings = data?.hasReadings ?? true;
+  const pollIntervalMs = !hasRegisteredAgent || !hasReadings ? 10000 : 30000;
+
+  useEffect(() => {
     const pollInterval = setInterval(() => {
       fetchDevices(true);
-    }, 30000); // Refresh every 30 seconds without reloading the page
+    }, pollIntervalMs);
 
     const relativeTickInterval = setInterval(() => {
       setTick((t) => t + 1);
@@ -101,7 +113,7 @@ export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
       clearInterval(pollInterval);
       clearInterval(relativeTickInterval);
     };
-  }, [fetchDevices]);
+  }, [fetchDevices, pollIntervalMs]);
 
   if (loading && !data) {
     return (
@@ -166,7 +178,7 @@ export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
               <span>Active location: {siteName}</span>
             </span>
             <span className="text-[11px] text-slate-500">
-              Auto-refreshes every 30s
+              Auto-refreshes every {pollIntervalMs === 10000 ? '10s' : '30s'}
             </span>
           </div>
 
@@ -189,8 +201,21 @@ export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
         </button>
       </div>
 
-      {/* Empty state if site has no devices yet */}
-      {totalCount === 0 ? (
+      {/* Empty state if site has no registered agent or no readings yet */}
+      {!hasRegisteredAgent || !hasReadings ? (
+        <SiteAgentEmptyState
+          siteId={siteId}
+          hasRegisteredAgent={hasRegisteredAgent}
+          hasReadings={hasReadings}
+          setupCode={data?.setupCode ?? null}
+          setupCodeExpiresAt={data?.setupCodeExpiresAt ?? null}
+          onCodeCreated={(newCode, expiresAt) => {
+            setData((prev) =>
+              prev ? { ...prev, setupCode: newCode, setupCodeExpiresAt: expiresAt } : prev
+            );
+          }}
+        />
+      ) : totalCount === 0 ? (
         <div
           className="rounded-[24px] p-10 sm:p-16 flex flex-col items-center justify-center text-center"
           style={{

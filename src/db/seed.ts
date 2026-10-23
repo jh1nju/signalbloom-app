@@ -9,7 +9,7 @@
 
 import { db, createPool } from './index.ts';
 import { organisations, sites, users, setupCodes } from './schema.ts';
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 import crypto from 'crypto';
 
 // Strict production guard
@@ -96,7 +96,7 @@ async function runSeed() {
     console.log(`✓ Found Staff User: ${staffUser.name} (${staffUser.email})`);
   }
 
-  // 3. Create Sites: Manukau Clinic, Papatoetoe Clinic, Botany Clinic
+  // 3. Create Sites: Manukau Clinic, Papatoetoe Clinic, Botany Clinic, New Office (no agent)
   const siteDefs = [
     {
       name: 'Manukau Clinic',
@@ -118,6 +118,13 @@ async function runSeed() {
       planName: 'Enterprise',
       monthlyPriceNzd: '199.00',
       codePrefix: 'BTN',
+    },
+    {
+      name: 'New Office (no agent)',
+      address: '42 Queen Street, Auckland CBD 1010',
+      planName: 'Pro',
+      monthlyPriceNzd: '149.00',
+      codePrefix: 'NEW',
     },
   ];
 
@@ -148,7 +155,9 @@ async function runSeed() {
     }
 
     // Clean up any old unused codes for this site to keep seed clean
-    await db.delete(setupCodes).where(eq(setupCodes.siteId, site.id));
+    await db
+      .delete(setupCodes)
+      .where(and(eq(setupCodes.siteId, site.id), isNull(setupCodes.usedAt)));
 
     // Create a new setup code expiring in 7 days
     const code = generateSetupCode(def.codePrefix);

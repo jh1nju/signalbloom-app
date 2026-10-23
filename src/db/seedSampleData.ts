@@ -58,10 +58,11 @@ async function runSampleDataSeed() {
   let totalSamplesCreated = 0;
 
   for (const site of seedSites) {
-    const config = siteDeviceConfigs[site.name] || {
-      subnet: `192.168.${Math.floor(Math.random() * 80 + 10)}`,
-      isDegraded: false,
-    };
+    const config = siteDeviceConfigs[site.name];
+    if (!config) {
+      console.log(`\n⏭️ Skipping Site: "${site.name}" (configured with no agent, devices, or readings).`);
+      continue;
+    }
     const { subnet, isDegraded } = config;
 
     console.log(`\n📦 Configuring Site: "${site.name}" (Subnet: ${subnet}.0/24, Status: ${isDegraded ? 'DEGRADED / HIGHER LATENCY' : 'HEALTHY'})...`);

@@ -210,11 +210,16 @@ alertsRouter.post(
         basicExplanation: aiResult.basicExplanation,
         nextRetryAt: aiResult.nextRetryAt,
       });
-    } catch (err: any) {
-      console.error('Failed to generate alert explanation:', err);
-      return res.status(500).json({
+    } catch (_err: any) {
+      return res.status(200).json({
+        alertId,
+        explanation: null,
+        recommendations: [],
+        aiAvailable: false,
+        basicExplanation: 'This usually means there is a temporary problem on the network.',
+        nextRetryAt: Date.now() + 30000,
         error: {
-          code: 'server_error',
+          code: 'ai_unavailable',
           message: AI_UNAVAILABLE_MESSAGE,
         },
       });

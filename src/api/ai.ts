@@ -73,12 +73,15 @@ aiRouter.post('/sites/:siteId/assistant', async (req: Request, res: Response) =>
     });
   } catch (err: any) {
     const isBusy = Boolean(err?.isBusy);
-    return res.status(503).json({
+    const message = isBusy ? AI_BUSY_MESSAGE : AI_UNAVAILABLE_MESSAGE;
+    return res.status(200).json({
       siteId,
+      answer: message,
+      suggestedAction: 'Keep an eye on the Network Health tab over the next few minutes.',
       aiAvailable: false,
       error: {
         code: isBusy ? 'ai_busy' : 'ai_unavailable',
-        message: isBusy ? AI_BUSY_MESSAGE : AI_UNAVAILABLE_MESSAGE,
+        message,
       },
     });
   }

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/index.ts';
-import { devices } from '../db/schema.ts';
-import { eq, asc } from 'drizzle-orm';
+import { devices, agents, metricSamples, setupCodes } from '../db/schema.ts';
+import { eq, asc, and, isNull, sql, desc } from 'drizzle-orm';
 
 export const devicesRouter = Router();
 
@@ -21,11 +21,43 @@ devicesRouter.get('/sites/:siteId/devices', async (req: Request, res: Response) 
   }
 
   try {
-    const siteDevices = await db
-      .select()
-      .from(devices)
-      .where(eq(devices.siteId, siteId))
-      .orderBy(asc(devices.online), asc(devices.hostname));
+    const [[agentRow], [anySampleRow], [validCodeRow], siteDevices] = await Promise.all([
+      db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.siteId, siteId))
+        .limit(1),
+      db
+        .select({ id: metricSamples.id })
+        .from(metricSamples)
+        .where(eq(metricSamples.siteId, siteId))
+        .limit(1),
+      db
+        .select({
+          code: setupCodes.code,
+          expiresAt: setupCodes.expiresAt,
+        })
+        .from(setupCodes)
+        .where(
+          and(
+            eq(setupCodes.siteId, siteId),
+            isNull(setupCodes.usedAt),
+            sql`${setupCodes.expiresAt} > NOW()`
+          )
+        )
+        .orderBy(desc(setupCodes.expiresAt))
+        .limit(1),
+      db
+        .select()
+        .from(devices)
+        .where(eq(devices.siteId, siteId))
+        .orderBy(asc(devices.online), asc(devices.hostname)),
+    ]);
+
+    const hasRegisteredAgent = Boolean(agentRow);
+    const hasReadings = Boolean(anySampleRow);
+    const setupCode = validCodeRow ? validCodeRow.code : null;
+    const setupCodeExpiresAt = validCodeRow ? new Date(validCodeRow.expiresAt).toISOString() : null;
 
     const nowMs = Date.now();
     const twentyFourHoursMs = 24 * 60 * 60 * 1000;
@@ -67,6 +99,10 @@ devicesRouter.get('/sites/:siteId/devices', async (req: Request, res: Response) 
 
     return res.json({
       siteId,
+      hasRegisteredAgent,
+      hasReadings,
+      setupCode,
+      setupCodeExpiresAt,
       summary: {
         total,
         online: onlineCount,

@@ -576,6 +576,25 @@ export async function runDevSampleTick(): Promise<void> {
     const isBandwidthTick = now.getMinutes() % 15 === 0 && now.getSeconds() < 30;
 
     for (const site of allSites) {
+      // Only generate background sample readings for sites that have a registered agent and already have readings
+      const [agentRow] = await db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.siteId, site.id))
+        .limit(1);
+      if (!agentRow) {
+        continue;
+      }
+
+      const [existingSampleRow] = await db
+        .select({ id: metricSamples.id })
+        .from(metricSamples)
+        .where(eq(metricSamples.siteId, site.id))
+        .limit(1);
+      if (!existingSampleRow) {
+        continue;
+      }
+
       const faultStatus = getSimulatedFaultStatus(site.id);
       const isPapatoetoe = site.name.toLowerCase().includes('papatoetoe');
 

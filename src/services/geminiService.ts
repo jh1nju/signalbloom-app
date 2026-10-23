@@ -13,9 +13,9 @@ export const AI_UNAVAILABLE_MESSAGE =
 export const AI_BUSY_MESSAGE =
   'The AI assistant is busy right now. Please try again in a minute.';
 
-// Primary stable (non-preview) Gemini Flash model and second, lighter Flash fallback model
-export const PRIMARY_FLASH_MODEL = 'gemini-flash-latest';
-export const FALLBACK_LIGHT_FLASH_MODEL = 'gemini-flash-lite-latest';
+// Main model for all calls from the app, and fallback model on 503 or 429
+export const PRIMARY_FLASH_MODEL = 'gemini-3.5-flash-lite';
+export const FALLBACK_LIGHT_FLASH_MODEL = 'gemini-3.1-flash-lite';
 
 // 20 seconds timeout per Gemini API call
 const GEMINI_CALL_TIMEOUT_MS = 20_000;
@@ -76,6 +76,9 @@ function getErrorStatus(err: any): number | null {
   if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
     return 429;
   }
+  if (msg.includes('402') || msg.toLowerCase().includes('prepayment credits')) {
+    return 402;
+  }
   return null;
 }
 
@@ -94,9 +97,15 @@ function is503OrTimeout(err: any): boolean {
   return status === 503 || isTimeoutError(err);
 }
 
-function formatSingleLineError(err: any): string {
+function is402OrCreditDepleted(err: any): boolean {
   const status = getErrorStatus(err);
+  return status === 402 || String(err?.message || '').toLowerCase().includes('prepayment credits');
+}
+
+function formatSingleLineError(err: any): string {
   if (isTimeoutError(err)) return `timeout after ${GEMINI_CALL_TIMEOUT_MS / 1000}s`;
+  if (is402OrCreditDepleted(err)) return 'HTTP 402 (prepayment credits depleted)';
+  const status = getErrorStatus(err);
   const firstLine = String(err?.message || err || 'Unknown error')
     .split('\n')[0]
     .slice(0, 140);
@@ -405,9 +414,9 @@ async function withTimeout<T>(promise: Promise<T>, ms = GEMINI_CALL_TIMEOUT_MS):
 }
 
 /**
- * Calls the primary stable Flash model (`gemini-flash-latest`) with a 20s timeout.
- * If it fails with 503 or 429, tries once more with the second, lighter Flash model
- * (`gemini-flash-lite-latest`) with a 20s timeout before giving up.
+ * Calls the main model (`gemini-3.5-flash-lite`) with a 20s timeout.
+ * If it fails with 503 or 429, tries once more with the fallback model
+ * (`gemini-3.1-flash-lite`) with a 20s timeout before giving up.
  */
 async function generateContentWithFlashFallback(params: {
   contents: string;
@@ -879,23 +888,19 @@ export async function askSiteAssistant(params: {
     response = await callAssistantModel();
   } catch (firstErr: any) {
     if (is503OrTimeout(firstErr) || is503Or429(firstErr)) {
-      console.warn(
-        `[AI] Assistant chat attempt #1 failed (${formatSingleLineError(firstErr)}) — retrying once in 3s`
-      );
       await new Promise((resolve) => setTimeout(resolve, 3000));
       try {
         response = await callAssistantModel();
-      } catch (secondErr: any) {
-        console.warn(
-          `[AI] Assistant chat retry failed (${formatSingleLineError(secondErr)})`
-        );
+      } catch (_secondErr: any) {
         const busyError: any = new Error(AI_BUSY_MESSAGE);
         busyError.isBusy = true;
         throw busyError;
       }
     } else {
-      console.warn(`[AI] Assistant chat failed (${formatSingleLineError(firstErr)})`);
-      throw firstErr;
+      const unavailableError: any = new Error(AI_UNAVAILABLE_MESSAGE);
+      unavailableError.isUnavailable = true;
+      unavailableError.originalStatus = getErrorStatus(firstErr);
+      throw unavailableError;
     }
   }
 

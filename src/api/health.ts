@@ -1,9 +1,21 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { db } from '../db/index.ts';
-import { metricSamples, devices, settings } from '../db/schema.ts';
-import { eq, and, sql, desc, gte } from 'drizzle-orm';
+import { metricSamples, devices, settings, agents, setupCodes, sites } from '../db/schema.ts';
+import { eq, and, sql, desc, gte, isNull } from 'drizzle-orm';
 
 export const healthRouter = Router();
+
+function generateSiteSetupCode(siteName: string): string {
+  const cleanLetters = (siteName || 'SITE').replace(/[^a-zA-Z]/g, '').toUpperCase();
+  const prefix = (cleanLetters.slice(0, 3) || 'NEW').padEnd(3, 'X');
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let randomPart = '';
+  for (let i = 0; i < 4; i++) {
+    randomPart += chars[crypto.randomInt(0, chars.length)];
+  }
+  return `SB-${prefix}-${randomPart}`;
+}
 
 interface MetricLimit {
   full: number;
@@ -59,6 +71,67 @@ function calculateScore(val: number, limit: MetricLimit, higherIsBetter: boolean
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// POST /api/sites/:siteId/setup-code
+// Creates a new unused setup code valid for 24 hours
+healthRouter.post('/sites/:siteId/setup-code', async (req: Request, res: Response) => {
+  const { siteId } = req.params;
+
+  if (!siteId || !UUID_REGEX.test(siteId)) {
+    return res.status(400).json({
+      error: {
+        code: 'invalid_site_id',
+        message: 'A valid site ID is required.',
+      },
+    });
+  }
+
+  try {
+    const [site] = await db
+      .select({ id: sites.id, name: sites.name })
+      .from(sites)
+      .where(eq(sites.id, siteId))
+      .limit(1);
+
+    if (!site) {
+      return res.status(404).json({
+        error: {
+          code: 'site_not_found',
+          message: 'Site not found.',
+        },
+      });
+    }
+
+    // Remove any existing unused codes for this site before creating a fresh 24-hour code
+    await db
+      .delete(setupCodes)
+      .where(and(eq(setupCodes.siteId, siteId), isNull(setupCodes.usedAt)));
+
+    const code = generateSiteSetupCode(site.name);
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // Valid 24 hours
+
+    await db.insert(setupCodes).values({
+      code,
+      siteId,
+      expiresAt,
+      usedAt: null,
+    });
+
+    return res.status(201).json({
+      siteId,
+      code,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (err: any) {
+    console.error('Failed to create setup code:', err);
+    return res.status(500).json({
+      error: {
+        code: 'server_error',
+        message: 'Could not create a new setup code.',
+      },
+    });
+  }
+});
+
 // GET /api/sites/:siteId/health
 healthRouter.get('/sites/:siteId/health', async (req: Request, res: Response) => {
   const { siteId } = req.params;
@@ -73,6 +146,40 @@ healthRouter.get('/sites/:siteId/health', async (req: Request, res: Response) =>
   }
 
   try {
+    // Check registered agent, readings, and unused/unexpired setup code for this site
+    const [[agentRow], [anySampleRow], [validCodeRow]] = await Promise.all([
+      db
+        .select({ id: agents.id })
+        .from(agents)
+        .where(eq(agents.siteId, siteId))
+        .limit(1),
+      db
+        .select({ id: metricSamples.id })
+        .from(metricSamples)
+        .where(eq(metricSamples.siteId, siteId))
+        .limit(1),
+      db
+        .select({
+          code: setupCodes.code,
+          expiresAt: setupCodes.expiresAt,
+        })
+        .from(setupCodes)
+        .where(
+          and(
+            eq(setupCodes.siteId, siteId),
+            isNull(setupCodes.usedAt),
+            sql`${setupCodes.expiresAt} > NOW()`
+          )
+        )
+        .orderBy(desc(setupCodes.expiresAt))
+        .limit(1),
+    ]);
+
+    const hasRegisteredAgent = Boolean(agentRow);
+    const hasReadings = Boolean(anySampleRow);
+    const setupCode = validCodeRow ? validCodeRow.code : null;
+    const setupCodeExpiresAt = validCodeRow ? new Date(validCodeRow.expiresAt).toISOString() : null;
+
     let weights = DEFAULT_WEIGHTS;
     let limits = DEFAULT_LIMITS;
 
@@ -322,6 +429,10 @@ healthRouter.get('/sites/:siteId/health', async (req: Request, res: Response) =>
 
     return res.json({
       siteId,
+      hasRegisteredAgent,
+      hasReadings,
+      setupCode,
+      setupCodeExpiresAt,
       score: overallScore,
       statusWord,
       statusColor,
