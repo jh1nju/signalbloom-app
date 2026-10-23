@@ -13,3 +13,5 @@
 | 2026-10-23 | Claude (claude.ai chat) | Code for result_action (maps the cloud's reply to recorded, drop or retry) | Reviewed, added and tested it; chose the allowed command list and the retry rules |
 | 2026-10-23 | Claude Code | Demo fault switch (flag and file) (except apply_fault), on/off logging, settings, send-line values, tests | Reviewed the plan; ran all tests and the live on/off checks |
 | 2026-10-23 | Claude (claude.ai chat) | Code for apply_fault (applies the fault to a copy of the reading) | Reviewed, added and tested it; fixed an indentation error when pasting |
+| 2026-10-23 | Google AI Studio | Sample data script, app shell, Network Health tab (score, breakdown, 24-hour charts), liquid glass theme | Reviewed each result in the preview; corrected renamed labels, invented taglines and a redrawn logo; ran the weight-change check |
+| 2026-10-23 | Claude (claude.ai chat) | Health score parts, starting weights and limits; theme and label-correction prompts; cleaned-up logo PNG (transparent background, upscaled) | Chose to use the weights as starting values for the team to confirm; chose the final label names |

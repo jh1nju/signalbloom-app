@@ -66,3 +66,14 @@ Context: the demo needs a network problem on cue, so the audience can see Signal
 Options: restart the agent with a flag; a switch that works while the agent is running; a separate fault simulator.
 Choice: --demo-fault starts the agent with the fault on, and creating or deleting a file named demo_fault in data_dir turns it on or off within 30 seconds without a restart. While on, latency rises by 300 ms and packet loss by 20 percentage points (capped at 100). Off by default.
 Reason: the fault can start at the right moment in the demo. Readings carry no demo marker, so the cloud reacts exactly as it would to a real problem.
+
+## D-012: How the health score is calculated
+Context: a non-technical office manager needs one number that says whether the network is healthy, but the agent measures several different things.
+Options: show each measurement separately; one score with equal weights; one weighted score with an explanation of what's affecting it.
+Choice: a score from 0 to 100, calculated from the last 15 minutes. Five parts, each scored 0 to 100 between a "zero" and a "full marks" limit: internet uptime (weight 30; full at 100%, zero at 90% or less), delay (25; full at 30 ms or less, zero at 200 ms or more), packet loss (20; full at 0%, zero at 10% or more), internet speed (15; full at 100 Mbps or more, zero at 5 Mbps or less), devices online (10; full when all are online, zero at half or fewer). A part with no data is left out and its weight shared among the others. 80 to 100 is "Healthy", 50 to 79 "Needs attention", below 50 "Problem". Weights and limits are stored in the settings table, not in code. These are starting values for the team to confirm.
+Reason: an outage hurts a business most, then slowness and lost data, so uptime carries the most weight. The "What's affecting your score" list shows which part is pulling the score down, so the number is never a black box.
+
+## D-013: Plain-English labels
+Context: the users are not technical.
+Choice: the dashboard uses "Internet uptime", "Delay", "Packet loss", "Internet speed" and "Devices online", in sentence case, with the technical term and unit in a tooltip.
+Reason: users understand the screen without IT knowledge, while the technical meaning is one hover away.

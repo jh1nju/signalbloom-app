@@ -12,3 +12,6 @@
 | 2026-10-23 | Demo fault unit tests | Pass | 16 tests: readings unchanged when off, changed with the flag or the file, loss capped at 100, normal after turning off |
 | 2026-10-23 | Demo fault on during a live run | Pass | Created data\demo_fault; within 30 s the agent logged DEMO FAULT ON and latency rose by about 300 ms |
 | 2026-10-23 | Demo fault off during a live run | Pass | Deleted the file; within 30 s the agent logged the fault off and readings returned to normal |
+| 2026-10-23 | Health score weights come from settings | Pass | Changed the uptime weight from 30 to 50; the score changed with no code change; set it back to 30 |
+| 2026-10-23 | Health score per site | Pass | All three sites show a score; the site with worse sample data has the lowest |
+| 2026-10-23 | Network Health at phone width | Pass | Layout fits a phone-sized window with no overflow |
