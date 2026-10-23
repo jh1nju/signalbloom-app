@@ -1,6 +1,6 @@
 {
   "name": "SignalBloom",
-  "description": "Intelligent signal discovery, trend synthesis, and market pulse monitoring platform.",
+  "description": "Simple, plain-English network health, security, and device monitoring for New Zealand dental clinics.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

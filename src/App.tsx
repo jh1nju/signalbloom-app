@@ -4,43 +4,79 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { testConnection, currentProjectId, currentDatabaseId } from './firebase';
+import { Sidebar, TABS, TabId } from './components/Sidebar';
+import { TopBar, SiteOption } from './components/TopBar';
+import { TabPlaceholder } from './components/TabPlaceholder';
 import { DevApiTest } from './components/DevApiTest';
-import { Terminal, Database, ArrowRight } from 'lucide-react';
+import { Terminal } from 'lucide-react';
 
 export default function App() {
-  const [connectionStatus, setConnectionStatus] = useState<string>('Checking cloud connection...');
-  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const isProd = import.meta.env.PROD || process.env.NODE_ENV === 'production';
   const [path, setPath] = useState(window.location.pathname);
 
-  const isProd = import.meta.env.PROD || process.env.NODE_ENV === 'production';
+  // Shell state
+  const [currentTab, setCurrentTab] = useState<TabId>('health');
+  const [organisationName, setOrganisationName] = useState<string>('Demo Dental Group');
+  const [sites, setSites] = useState<SiteOption[]>([
+    { id: 'site-1', name: 'Manukau Clinic', address: '15 Putney Way, Manukau' },
+    { id: 'site-2', name: 'Papatoetoe Clinic', address: '128 St George St, Papatoetoe' },
+    { id: 'site-3', name: 'Botany Clinic', address: '588 Chapel Rd, Botany' },
+  ]);
+  const [selectedSiteId, setSelectedSiteId] = useState<string>(() => {
+    return localStorage.getItem('signalbloom_selected_site_id') || '';
+  });
+  const [isSampleData, setIsSampleData] = useState<boolean>(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
 
+  // Handle browser popstate navigation
   useEffect(() => {
     const onPopState = () => setPath(window.location.pathname);
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const navigateTo = (newPath: string) => {
-    window.history.pushState({}, '', newPath);
-    setPath(newPath);
-  };
-
+  // Fetch organisation, sites, and sample_data setting
   useEffect(() => {
-    testConnection().then((res) => {
-      setIsConnected(res.ok);
-      setConnectionStatus(res.message);
-    });
+    const fetchShellData = async () => {
+      try {
+        const res = await fetch('/api/app-shell');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.organisation?.name) {
+            setOrganisationName(data.organisation.name);
+          }
+          if (Array.isArray(data.sites) && data.sites.length > 0) {
+            setSites(data.sites);
+            setSelectedSiteId((prev) => {
+              const exists = data.sites.some((s: SiteOption) => s.id === prev);
+              const nextId = exists ? prev : data.sites[0].id;
+              localStorage.setItem('signalbloom_selected_site_id', nextId);
+              return nextId;
+            });
+          }
+          setIsSampleData(Boolean(data.sampleData));
+        }
+      } catch (err) {
+        console.warn('Could not fetch app-shell bootstrap data:', err);
+      }
+    };
+
+    fetchShellData();
   }, []);
 
-  // Route: /dev/api-test (Hidden in production)
+  const handleSelectSite = (siteId: string) => {
+    setSelectedSiteId(siteId);
+    localStorage.setItem('signalbloom_selected_site_id', siteId);
+  };
+
+  // Dedicated dev-only testing route
   if (path === '/dev/api-test') {
     if (isProd) {
       return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-200">404 - Not Found</h1>
-            <p className="text-xs text-slate-500 mt-2">This page is not available in production environments.</p>
+        <div className="min-h-screen bg-[#F0F4F8] text-[#1A2B3B] flex items-center justify-center p-6">
+          <div className="glass-panel p-8 text-center max-w-sm">
+            <h1 className="text-xl font-bold text-slate-800">404 - Not Found</h1>
+            <p className="text-xs text-slate-500 mt-2">This page is not available in production.</p>
           </div>
         </div>
       );
@@ -48,54 +84,56 @@ export default function App() {
     return <DevApiTest />;
   }
 
+  const activeTabItem = TABS.find((t) => t.id === currentTab) || TABS[0];
+  const activeSite = sites.find((s) => s.id === selectedSiteId) || sites[0];
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-6 font-sans">
-      <div className="w-full max-w-md bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center shadow-2xl backdrop-blur-sm">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 mb-4">
-          <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping" />
-        </div>
+    <div className="min-h-screen lg:h-screen w-full p-3 sm:p-4 box-border overflow-x-hidden lg:overflow-hidden">
+      <div className="h-full w-full flex flex-col lg:grid lg:grid-cols-[260px_1fr] gap-4">
+        {/* Left Sidebar */}
+        <Sidebar
+          currentTab={currentTab}
+          onSelectTab={setCurrentTab}
+          isOpenMobile={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
+        />
 
-        <h1 className="text-xl font-bold tracking-tight text-white mb-2">
-          SignalBloom
-        </h1>
-        <p className="text-xs text-slate-400 mb-6">
-          Backend API ready. Connected to Cloud SQL & Firebase:
-        </p>
+        {/* Main View Area */}
+        <main className="flex-1 flex flex-col gap-4 min-w-0 h-full overflow-hidden">
+          {/* Header */}
+          <TopBar
+            organisationName={organisationName}
+            sites={sites}
+            selectedSiteId={selectedSiteId}
+            onSelectSite={handleSelectSite}
+            isSampleData={isSampleData}
+            onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
+          />
 
-        <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-3.5 text-left space-y-1.5 text-xs font-mono">
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500">Project:</span>
-            <span className="text-slate-200 font-semibold">{currentProjectId}</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-slate-500">Database:</span>
-            <span className="text-slate-300 truncate max-w-[200px]" title={currentDatabaseId}>
-              {currentDatabaseId}
-            </span>
-          </div>
-          <div className="flex items-center justify-between pt-1 border-t border-slate-800">
-            <span className="text-slate-500">Status:</span>
-            <span className={`inline-flex items-center gap-1.5 font-medium ${isConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-              {isConnected ? 'Online' : 'Initializing'}
-            </span>
-          </div>
-        </div>
-
-        {/* Development Tooling Link (Hidden in production) */}
-        {!isProd && (
-          <div className="mt-6 pt-5 border-t border-slate-800/80">
-            <button
-              onClick={() => navigateTo('/dev/api-test')}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800/90 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-emerald-400 hover:text-emerald-300 transition-all shadow-md group"
-            >
-              <Terminal className="w-4 h-4 text-emerald-400" />
-              <span>Launch /dev/api-test Runner</span>
-              <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5" />
-            </button>
-          </div>
-        )}
+          {/* Content Area */}
+          <TabPlaceholder tab={activeTabItem} currentSite={activeSite} />
+        </main>
       </div>
+
+      {/* Dev helper pill (Hidden in production) */}
+      {!isProd && (
+        <button
+          onClick={() => {
+            window.history.pushState({}, '', '/dev/api-test');
+            setPath('/dev/api-test');
+          }}
+          className="fixed bottom-6 right-6 z-40 px-4 py-2 rounded-full font-mono text-[11px] font-medium flex items-center gap-2 shadow-xl transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+          style={{
+            background: 'rgba(26, 43, 59, 0.9)',
+            color: 'white',
+            backdropFilter: 'blur(10px)',
+          }}
+          title="Open dev test runner"
+        >
+          <Terminal className="w-3.5 h-3.5" style={{ color: 'var(--accent-mint)' }} strokeWidth={2.5} />
+          <span>dev/api-test</span>
+        </button>
+      )}
     </div>
   );
 }

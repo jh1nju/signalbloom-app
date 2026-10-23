@@ -2,14 +2,16 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { agentRouter } from './src/api/agent.ts';
+import { appShellRouter } from './src/api/appShell.ts';
 
 dotenv.config();
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-// Mount Agent API routes under /api
+// Mount API routes
 app.use('/api', agentRouter);
+app.use('/api', appShellRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
