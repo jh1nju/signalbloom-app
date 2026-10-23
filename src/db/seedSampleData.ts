@@ -185,7 +185,7 @@ async function runSampleDataSeed() {
         hostname: 'staff-breakroom-phone',
         vendor: 'Samsung',
         online: false, // 2nd offline device
-        isKnown: false,
+        isKnown: true,
         firstSeen: new Date(now.getTime() - 3 * 24 * 3600 * 1000),
         lastSeen: new Date(now.getTime() - 3 * 3600 * 1000), // offline since 3h ago
       },

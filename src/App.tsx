@@ -9,6 +9,7 @@ import { TopBar, SiteOption } from './components/TopBar';
 import { TabPlaceholder } from './components/TabPlaceholder';
 import { NetworkHealthTab } from './components/NetworkHealthTab';
 import { DevicesTab } from './components/DevicesTab';
+import { SecurityTab } from './components/SecurityTab';
 import { DevApiTest } from './components/DevApiTest';
 import { Terminal } from 'lucide-react';
 
@@ -83,7 +84,7 @@ export default function App() {
         </div>
       );
     }
-    return <DevApiTest />;
+    return <DevApiTest selectedSiteId={selectedSiteId} />;
   }
 
   const activeTabItem = TABS.find((t) => t.id === currentTab) || TABS[0];
@@ -115,6 +116,11 @@ export default function App() {
           {/* Tab Content View */}
           {currentTab === 'health' ? (
             <NetworkHealthTab
+              siteId={selectedSiteId}
+              siteName={activeSite?.name || 'Selected site'}
+            />
+          ) : currentTab === 'security' ? (
+            <SecurityTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
             />

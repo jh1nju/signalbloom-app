@@ -1,16 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Play, 
-  CheckCircle2, 
-  XCircle, 
   Terminal, 
-  Key, 
-  Activity, 
-  ShieldAlert, 
-  ArrowRight, 
-  RefreshCw,
-  Copy,
-  Check
+  Zap,
+  Clock
 } from 'lucide-react';
 
 interface TestResult {
@@ -24,7 +17,16 @@ interface TestResult {
   timeMs?: number;
 }
 
-export const DevApiTest: React.FC = () => {
+interface SiteOption {
+  id: string;
+  name: string;
+}
+
+interface DevApiTestProps {
+  selectedSiteId?: string;
+}
+
+export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
   // Production guard
   const isProd = import.meta.env.PROD || process.env.NODE_ENV === 'production';
   if (isProd) {
@@ -43,17 +45,24 @@ export const DevApiTest: React.FC = () => {
   const [siteToken, setSiteToken] = useState<string>('');
   const [siteId, setSiteId] = useState<string>('');
 
+  const [sites, setSites] = useState<SiteOption[]>([]);
+  const [faultSiteId, setFaultSiteId] = useState<string>(
+    selectedSiteId || localStorage.getItem('signalbloom_selected_site_id') || ''
+  );
+  const [faultRemainingSec, setFaultRemainingSec] = useState<number>(0);
+
   // Results for tests
   const [test1Result, setTest1Result] = useState<TestResult | null>(null);
   const [test2Result1, setTest2Result1] = useState<TestResult | null>(null);
   const [test2Result2, setTest2Result2] = useState<TestResult | null>(null);
   const [test3Result, setTest3Result] = useState<TestResult | null>(null);
+  const [faultResult, setFaultResult] = useState<TestResult | null>(null);
 
   const [isLoading1, setIsLoading1] = useState(false);
   const [isLoading2, setIsLoading2] = useState(false);
   const [isLoading3, setIsLoading3] = useState(false);
+  const [isLoadingFault, setIsLoadingFault] = useState(false);
 
-  // Fetch available seed setup codes
   const loadAvailableCodes = async () => {
     try {
       const res = await fetch('/api/dev/available-codes');
@@ -72,9 +81,58 @@ export const DevApiTest: React.FC = () => {
     }
   };
 
+  const loadSitesAndFaultStatus = async () => {
+    try {
+      const res = await fetch('/api/app-shell');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.sites) && data.sites.length > 0) {
+          setSites(data.sites);
+          setFaultSiteId((prev) => {
+            const exists = data.sites.some((s: SiteOption) => s.id === prev);
+            return exists ? prev : data.sites[0].id;
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load sites:', e);
+    }
+  };
+
   useEffect(() => {
     loadAvailableCodes();
+    loadSitesAndFaultStatus();
   }, []);
+
+  useEffect(() => {
+    if (selectedSiteId) {
+      setFaultSiteId(selectedSiteId);
+    }
+  }, [selectedSiteId]);
+
+  useEffect(() => {
+    if (!faultSiteId) return;
+    let mounted = true;
+
+    const checkFault = async () => {
+      try {
+        const res = await fetch(`/api/dev/simulate-fault?site_id=${encodeURIComponent(faultSiteId)}`);
+        if (res.ok && mounted) {
+          const data = await res.json();
+          setFaultRemainingSec(data?.status?.remainingSeconds ?? 0);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    checkFault();
+    const timer = setInterval(checkFault, 3000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [faultSiteId]);
 
   // -------------------------------------------------------------------------
   // Test 1: Register with a seed setup code
@@ -164,7 +222,6 @@ export const DevApiTest: React.FC = () => {
       ],
     };
 
-    // First Call: Expect accepted: 1, duplicates: 0
     try {
       const start1 = performance.now();
       const res1 = await fetch('/api/ingest', {
@@ -188,7 +245,6 @@ export const DevApiTest: React.FC = () => {
         timeMs: timeMs1,
       });
 
-      // Second Call: Send identical measured_at reading to test duplicate handling
       const start2 = performance.now();
       const res2 = await fetch('/api/ingest', {
         method: 'POST',
@@ -269,6 +325,49 @@ export const DevApiTest: React.FC = () => {
     }
   };
 
+  // -------------------------------------------------------------------------
+  // Simulate fault: 3 minutes of delay 330 ms & packet loss 20% for selected site
+  // -------------------------------------------------------------------------
+  const runSimulateFault = async () => {
+    setIsLoadingFault(true);
+    setFaultResult(null);
+    const start = performance.now();
+
+    try {
+      const res = await fetch('/api/dev/simulate-fault', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_id: faultSiteId }),
+      });
+
+      const data = await res.json();
+      const timeMs = Math.round(performance.now() - start);
+
+      setFaultResult({
+        title: 'Simulate fault (3 minutes)',
+        endpoint: '/api/dev/simulate-fault',
+        method: 'POST',
+        statusCode: res.status,
+        statusText: res.statusText,
+        responseJson: data,
+        timeMs,
+      });
+
+      if (res.ok && data?.simulated_fault?.duration_seconds) {
+        setFaultRemainingSec(data.simulated_fault.duration_seconds);
+      }
+    } catch (err: any) {
+      setFaultResult({
+        title: 'Simulate fault (3 minutes)',
+        endpoint: '/api/dev/simulate-fault',
+        method: 'POST',
+        error: err.message,
+      });
+    } finally {
+      setIsLoadingFault(false);
+    }
+  };
+
   const getStatusBadge = (code?: number) => {
     if (!code) return null;
     let color = 'bg-slate-800 text-slate-300 border-slate-700';
@@ -295,7 +394,7 @@ export const DevApiTest: React.FC = () => {
                 <Terminal className="w-5 h-5" />
               </span>
               <h1 className="text-xl font-bold tracking-tight text-white">
-                SignalBloom Agent API Test Suite
+                SignalBloom agent API test suite
               </h1>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 font-bold">
                 DEV ONLY
@@ -311,7 +410,7 @@ export const DevApiTest: React.FC = () => {
               href="/"
               className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
             >
-              ← Back to App
+              ← Back to app
             </a>
           </div>
         </div>
@@ -332,6 +431,74 @@ export const DevApiTest: React.FC = () => {
             <span className="text-slate-500">Site ID:</span>
             <span className="text-slate-300">{siteId || 'Not set'}</span>
           </div>
+        </div>
+
+        {/* ================================================================= */}
+        {/* SIMULATE FAULT CARD */}
+        {/* ================================================================= */}
+        <div className="bg-slate-900/60 rounded-2xl border border-amber-500/30 p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-400 text-xs font-mono font-bold flex items-center justify-center">
+                  <Zap className="w-3.5 h-3.5" />
+                </span>
+                <h3 className="text-sm font-bold text-slate-100">
+                  Simulate fault (3 minutes)
+                </h3>
+                {faultRemainingSec > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-rose-950/90 text-rose-300 border border-rose-700">
+                    <Clock className="w-3 h-3 animate-pulse" />
+                    Active ({faultRemainingSec}s left)
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                For the next 3 minutes, the sample generator's readings for the selected site have delay <code className="text-amber-300 font-mono">330 ms</code> and packet loss <code className="text-amber-300 font-mono">20%</code>, then it goes back to normal by itself.
+              </p>
+            </div>
+
+            <button
+              onClick={runSimulateFault}
+              disabled={isLoadingFault}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5 fill-current" />
+              <span>{isLoadingFault ? 'Starting...' : 'Simulate fault'}</span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs flex-wrap pt-2 border-t border-slate-800/60">
+            <span className="text-slate-400 font-medium">Selected site:</span>
+            <select
+              value={faultSiteId}
+              onChange={(e) => {
+                setFaultSiteId(e.target.value);
+                localStorage.setItem('signalbloom_selected_site_id', e.target.value);
+              }}
+              className="px-2.5 py-1 bg-slate-950 border border-slate-800 rounded-lg text-slate-100 text-xs focus:outline-none focus:border-amber-500"
+            >
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {faultResult && (
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-mono text-slate-400">
+                  {faultResult.method} {faultResult.endpoint} ({faultResult.timeMs}ms)
+                </span>
+                {getStatusBadge(faultResult.statusCode)}
+              </div>
+              <pre className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs font-mono text-amber-300 overflow-x-auto leading-relaxed">
+                {JSON.stringify(faultResult.responseJson || { error: faultResult.error }, null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
 
         {/* ================================================================= */}
@@ -356,14 +523,13 @@ export const DevApiTest: React.FC = () => {
             <button
               onClick={runTest1}
               disabled={isLoading1}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all disabled:opacity-50 shrink-0"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               <span>{isLoading1 ? 'Running...' : 'Run Test 1'}</span>
             </button>
           </div>
 
-          {/* Setup Code selection */}
           <div className="flex items-center gap-2 text-xs flex-wrap pt-2 border-t border-slate-800/60">
             <span className="text-slate-400 font-medium">Setup Code:</span>
             <input
@@ -380,7 +546,7 @@ export const DevApiTest: React.FC = () => {
                   <button
                     key={code}
                     onClick={() => setSetupCode(code)}
-                    className="font-mono text-emerald-400/80 hover:text-emerald-300 underline"
+                    className="font-mono text-emerald-400/80 hover:text-emerald-300 underline cursor-pointer"
                   >
                     {code}
                   </button>
@@ -389,7 +555,6 @@ export const DevApiTest: React.FC = () => {
             )}
           </div>
 
-          {/* Result Output */}
           {test1Result && (
             <div className="space-y-2 pt-2">
               <div className="flex items-center justify-between text-xs">
@@ -427,17 +592,15 @@ export const DevApiTest: React.FC = () => {
             <button
               onClick={runTest2}
               disabled={isLoading2}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition-all disabled:opacity-50 shrink-0"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               <span>{isLoading2 ? 'Running...' : 'Run Test 2'}</span>
             </button>
           </div>
 
-          {/* Results: First Call & Duplicate Call */}
           {(test2Result1 || test2Result2) && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-              {/* Call 1 */}
               {test2Result1 && (
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2">
                   <div className="flex items-center justify-between text-xs">
@@ -451,7 +614,6 @@ export const DevApiTest: React.FC = () => {
                 </div>
               )}
 
-              {/* Call 2 */}
               {test2Result2 && (
                 <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 space-y-2">
                   <div className="flex items-center justify-between text-xs">
@@ -490,14 +652,13 @@ export const DevApiTest: React.FC = () => {
             <button
               onClick={runTest3}
               disabled={isLoading3}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-rose-500 hover:bg-rose-400 text-white transition-all disabled:opacity-50 shrink-0"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-rose-500 hover:bg-rose-400 text-white transition-all disabled:opacity-50 shrink-0 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               <span>{isLoading3 ? 'Running...' : 'Run Test 3'}</span>
             </button>
           </div>
 
-          {/* Result Output */}
           {test3Result && (
             <div className="space-y-2 pt-2">
               <div className="flex items-center justify-between text-xs">

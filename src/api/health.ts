@@ -93,26 +93,50 @@ healthRouter.get('/sites/:siteId/health', async (req: Request, res: Response) =>
         .onConflictDoUpdate({ target: settings.key, set: { value: DEFAULT_LIMITS } });
     }
 
-    const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const [windowRow] = await db
+      .select({ value: settings.value })
+      .from(settings)
+      .where(eq(settings.key, 'score_window_minutes'));
+
+    let scoreWindowMinutes = 5;
+    if (windowRow && windowRow.value !== null && windowRow.value !== undefined) {
+      const parsed =
+        typeof windowRow.value === 'number'
+          ? windowRow.value
+          : typeof windowRow.value === 'object' && 'minutes' in (windowRow.value as any)
+            ? Number((windowRow.value as any).minutes)
+            : Number(windowRow.value);
+      if (!isNaN(parsed) && parsed > 0) {
+        scoreWindowMinutes = parsed;
+      }
+    } else {
+      await db
+        .insert(settings)
+        .values({ key: 'score_window_minutes', value: 5 })
+        .onConflictDoUpdate({ target: settings.key, set: { value: 5 } });
+    }
+
+    const windowStart = new Date(Date.now() - scoreWindowMinutes * 60 * 1000);
     let recentSamples = await db
       .select()
       .from(metricSamples)
       .where(
         and(
           eq(metricSamples.siteId, siteId),
-          gte(metricSamples.measuredAt, fifteenMinutesAgo)
+          gte(metricSamples.measuredAt, windowStart)
         )
       )
       .orderBy(desc(metricSamples.measuredAt));
 
-    // Fallback if no samples in the last 15m (e.g. dev environment idle): use most recent 30 samples
+    // Fallback if no samples in the window (e.g. dev environment idle): use most recent samples for window
     if (recentSamples.length === 0) {
+      const fallbackLimit = Math.max(1, Math.round(scoreWindowMinutes * 2));
       recentSamples = await db
         .select()
         .from(metricSamples)
         .where(eq(metricSamples.siteId, siteId))
         .orderBy(desc(metricSamples.measuredAt))
-        .limit(30);
+        .limit(fallbackLimit);
     }
 
     const currentDevices = await db
@@ -290,6 +314,7 @@ healthRouter.get('/sites/:siteId/health', async (req: Request, res: Response) =>
       score: overallScore,
       statusWord,
       statusColor,
+      scoreWindowMinutes,
       parts: partsLowestFirst,
       weights,
       limits,

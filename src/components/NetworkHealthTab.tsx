@@ -3,7 +3,11 @@ import {
   Activity, 
   HelpCircle, 
   RefreshCw, 
-  CheckCircle2
+  CheckCircle2,
+  AlertTriangle,
+  AlertOctagon,
+  Clock,
+  Repeat
 } from 'lucide-react';
 
 interface PartResult {
@@ -34,6 +38,7 @@ interface HealthResponse {
   score: number;
   statusWord: 'Healthy' | 'Needs attention' | 'Problem';
   statusColor: 'green' | 'amber' | 'red';
+  scoreWindowMinutes?: number;
   parts: PartResult[];
   lastEvaluatedAt: string;
   charts: {
@@ -42,12 +47,34 @@ interface HealthResponse {
   };
 }
 
+export interface AlertItem {
+  id: string;
+  siteId: string;
+  deviceId: string | null;
+  category: 'health' | 'security';
+  severity: 'critical' | 'warning' | 'info';
+  rule: string;
+  title: string;
+  reason: string;
+  status: 'open' | 'resolved';
+  occurrenceCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+interface AlertsResponse {
+  siteId: string;
+  activeHealthAlerts: AlertItem[];
+  activeSecurityAlerts: AlertItem[];
+  resolvedSecurityAlerts: AlertItem[];
+  lastEvaluatedAt: string;
+}
+
 interface NetworkHealthTabProps {
   siteId: string;
   siteName: string;
 }
 
-// Tooltips dictionary per requirement 1
 const PART_TOOLTIPS: Record<string, string> = {
   uptime: 'How often your internet connection was working.',
   latency: 'Latency: how long data takes to reach the internet, in milliseconds.',
@@ -60,8 +87,30 @@ const PART_TOOLTIPS: Record<string, string> = {
   'chart-speed': 'Download speed, in megabits per second (Mbps).',
 };
 
+export function formatAlertDuration(firstSeenIso: string, endIso?: string): string {
+  const startMs = new Date(firstSeenIso).getTime();
+  const endMs = endIso ? new Date(endIso).getTime() : Date.now();
+  if (isNaN(startMs)) return 'Just started';
+
+  const diffSeconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
+  if (diffSeconds < 60) {
+    return 'Less than a minute';
+  }
+  const minutes = Math.floor(diffSeconds / 60);
+  if (minutes < 60) {
+    return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
 export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, siteName }) => {
   const [data, setData] = useState<HealthResponse | null>(null);
+  const [activeAlerts, setActiveAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
@@ -73,11 +122,19 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
     else setIsRefreshing(true);
 
     try {
-      const res = await fetch(`/api/sites/${siteId}/health`);
-      if (res.ok) {
-        const json: HealthResponse = await res.json();
+      const [healthRes, alertsRes] = await Promise.all([
+        fetch(`/api/sites/${siteId}/health`),
+        fetch(`/api/sites/${siteId}/alerts`),
+      ]);
+
+      if (healthRes.ok) {
+        const json: HealthResponse = await healthRes.json();
         setData(json);
         setLastRefreshed(new Date());
+      }
+      if (alertsRes.ok) {
+        const alertsJson: AlertsResponse = await alertsRes.json();
+        setActiveAlerts(alertsJson.activeHealthAlerts ?? []);
       }
     } catch (err) {
       console.error('Failed to fetch health data:', err);
@@ -102,7 +159,7 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
       <div className="glass-panel p-10 flex-1 flex flex-col items-center justify-center min-h-[400px]">
         <div className="w-10 h-10 rounded-full border-2 border-teal-500 border-t-transparent animate-spin mb-4" />
         <p className="text-sm font-medium text-slate-600">Evaluating network health for {siteName}...</p>
-        <p className="text-xs text-slate-400 mt-1">Analyzing metrics from the last 15 minutes</p>
+        <p className="text-xs text-slate-400 mt-1">Analyzing recent metrics</p>
       </div>
     );
   }
@@ -110,11 +167,18 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
   const score = data?.score ?? 100;
   const statusWord = data?.statusWord ?? 'Healthy';
   const statusColor = data?.statusColor ?? 'green';
+  const scoreWindowMinutes = data?.scoreWindowMinutes ?? 5;
   const parts = data?.parts ?? [];
   const telemetry = data?.charts?.telemetry ?? [];
   const bandwidth = (data?.charts?.bandwidth ?? []).filter(
     (b) => b && typeof b.download === 'number' && !isNaN(b.download)
   );
+
+  // Ensure critical first
+  const sortedAlerts = [...activeAlerts].sort((a, b) => {
+    const rank = (s: string) => (s === 'critical' ? 0 : s === 'warning' ? 1 : 2);
+    return rank(a.severity) - rank(b.severity);
+  });
 
   const colorStyles = {
     green: {
@@ -140,7 +204,6 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
     },
   }[statusColor];
 
-  // Helper for rendering SVG sparklines
   const renderLineChart = (
     points: { x: number; y: number }[],
     strokeColor: string,
@@ -216,7 +279,101 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
       </div>
 
       {/* =================================================================== */}
-      {/* 6. BIG HEALTH SCORE AT TOP OF THE PAGE (ABOVE WHAT'S AFFECTING SCORE) */}
+      {/* ACTIVE ALERTS PANEL AT THE TOP (CRITICAL FIRST) */}
+      {/* =================================================================== */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+            Active alerts
+          </h2>
+          {sortedAlerts.length > 0 && (
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+              {sortedAlerts.length} active
+            </span>
+          )}
+        </div>
+
+        {sortedAlerts.length === 0 ? (
+          <div className="bg-white/75 rounded-2xl border border-black/[0.06] p-4 sm:p-5 flex items-center gap-3 shadow-2xs">
+            <div className="w-8 h-8 rounded-xl bg-emerald-50 border border-emerald-200/70 flex items-center justify-center text-emerald-600 shrink-0">
+              <CheckCircle2 className="w-4 h-4" />
+            </div>
+            <span className="text-sm font-medium text-slate-700">
+              No problems right now
+            </span>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {sortedAlerts.map((alert) => {
+              const isCritical = alert.severity === 'critical';
+              return (
+                <div
+                  key={alert.id}
+                  className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
+                    isCritical
+                      ? 'bg-rose-50/75 border-rose-200/90'
+                      : 'bg-amber-50/75 border-amber-200/90'
+                  }`}
+                >
+                  <div className="flex items-start gap-3.5">
+                    <div
+                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                        isCritical
+                          ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                          : 'bg-amber-100 text-amber-700 border border-amber-200'
+                      }`}
+                    >
+                      {isCritical ? (
+                        <AlertOctagon className="w-5 h-5" />
+                      ) : (
+                        <AlertTriangle className="w-5 h-5" />
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                            isCritical
+                              ? 'bg-rose-600 text-white border-rose-700'
+                              : 'bg-amber-500 text-white border-amber-600'
+                          }`}
+                        >
+                          {isCritical ? 'Critical' : 'Warning'}
+                        </span>
+                        <h3 className="text-sm sm:text-base font-bold text-slate-900">
+                          {alert.title}
+                        </h3>
+                      </div>
+
+                      <p className="text-xs sm:text-sm text-slate-700 leading-relaxed">
+                        {alert.reason}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto gap-2 text-xs text-slate-600 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-black/[0.06]">
+                    <span className="inline-flex items-center gap-1.5 font-medium">
+                      <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Happening for {formatAlertDuration(alert.firstSeenAt)}</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/80 border border-black/[0.08] font-semibold text-slate-700">
+                      <Repeat className="w-3 h-3 text-slate-400" />
+                      <span>
+                        {alert.occurrenceCount}{' '}
+                        {alert.occurrenceCount === 1 ? 'time' : 'times'}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* =================================================================== */}
+      {/* BIG HEALTH SCORE (ABOVE WHAT'S AFFECTING SCORE) */}
       {/* =================================================================== */}
       <div
         className="rounded-3xl p-6 sm:p-8 border transition-all flex flex-col md:flex-row items-center justify-between gap-8"
@@ -270,7 +427,9 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
         <div className="bg-white/80 rounded-2xl p-4 border border-white/60 shadow-2xs text-xs space-y-1.5 w-full md:w-auto min-w-[210px]">
           <div className="flex justify-between items-center text-slate-500">
             <span>Window:</span>
-            <span className="font-semibold text-slate-800">Last 15 minutes</span>
+            <span className="font-semibold text-slate-800">
+              Last {scoreWindowMinutes} {scoreWindowMinutes === 1 ? 'minute' : 'minutes'}
+            </span>
           </div>
           <div className="flex justify-between items-center text-slate-500">
             <span>Evaluated:</span>
@@ -324,7 +483,6 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
                       <span className="font-semibold text-sm text-slate-900">
                         {part.label}
                       </span>
-                      {/* Tooltip button */}
                       <div className="relative inline-block">
                         <button
                           type="button"
@@ -344,7 +502,6 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
                       </div>
                     </div>
 
-                    {/* Value rendered with normal text font (Requirement 7) */}
                     <div className="flex items-center gap-2 mt-0.5">
                       <span className="text-xs font-medium text-slate-700">
                         {part.valueFormatted}
@@ -381,7 +538,7 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
       </div>
 
       {/* =================================================================== */}
-      {/* 24-HOUR NETWORK TRENDS (Sentence Case & Requirement 5 Subtitle) */}
+      {/* 24-HOUR NETWORK TRENDS */}
       {/* =================================================================== */}
       <div className="space-y-4 pt-2">
         <div>
@@ -500,7 +657,6 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
               </span>
             </div>
 
-            {/* Timeline Bar */}
             <div className="h-10 flex items-center gap-0.5 rounded-xl p-1.5 bg-slate-50 border border-slate-100 overflow-hidden">
               {telemetry.slice(-96).map((t, i) => (
                 <div

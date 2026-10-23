@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db } from '../db/index.ts';
 import {
   setupCodes,
@@ -30,6 +30,7 @@ export interface AuthenticatedAgentRequest extends Request {
     siteId: string;
     hostname: string;
     agentVersion: string;
+    createdAt: Date;
   };
 }
 
@@ -59,6 +60,7 @@ export async function requireAgentAuth(
         siteId: agents.siteId,
         hostname: agents.hostname,
         agentVersion: agents.agentVersion,
+        createdAt: agents.createdAt,
       })
       .from(agents)
       .where(eq(agents.tokenHash, tokenHash));
@@ -74,29 +76,6 @@ export async function requireAgentAuth(
     return apiError(res, 401, 'invalid_token', 'Site token is missing or not valid.');
   }
 }
-
-// Dev-only helper to fetch available setup codes for testing (hidden in production)
-agentRouter.get('/dev/available-codes', async (req: Request, res: Response) => {
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(404).json({ error: { code: 'not_found', message: 'Not available in production' } });
-  }
-
-  try {
-    const codes = await db
-      .select({
-        code: setupCodes.code,
-        siteId: setupCodes.siteId,
-        expiresAt: setupCodes.expiresAt,
-        usedAt: setupCodes.usedAt,
-      })
-      .from(setupCodes)
-      .where(and(sql`${setupCodes.usedAt} IS NULL`, sql`${setupCodes.expiresAt} > NOW()`));
-
-    return res.json({ codes });
-  } catch (err: any) {
-    return res.status(500).json({ error: { code: 'server_error', message: err.message } });
-  }
-});
 
 // ---------------------------------------------------------------------------
 // 1. POST /api/agent/register
@@ -174,7 +153,7 @@ agentRouter.post(
   requireAgentAuth,
   async (req: AuthenticatedAgentRequest, res: Response) => {
     const agent = req.agent!;
-    const { site_id, sent_at, readings, devices: incomingDevices } = req.body || {};
+    const { site_id, readings, devices: incomingDevices } = req.body || {};
 
     if (!site_id || typeof site_id !== 'string') {
       return apiError(res, 400, 'invalid_body', 'Request body is invalid.');
@@ -210,9 +189,18 @@ agentRouter.post(
             latencyMs: Number(r.latency_ms),
             packetLossPct: Number(r.packet_loss_pct),
             internetUp: Boolean(r.internet_up),
-            downloadMbps: r.download_mbps !== null && r.download_mbps !== undefined ? Number(r.download_mbps) : null,
-            uploadMbps: r.upload_mbps !== null && r.upload_mbps !== undefined ? Number(r.upload_mbps) : null,
-            errorRatePct: r.error_rate_pct !== null && r.error_rate_pct !== undefined ? Number(r.error_rate_pct) : null,
+            downloadMbps:
+              r.download_mbps !== null && r.download_mbps !== undefined
+                ? Number(r.download_mbps)
+                : null,
+            uploadMbps:
+              r.upload_mbps !== null && r.upload_mbps !== undefined
+                ? Number(r.upload_mbps)
+                : null,
+            errorRatePct:
+              r.error_rate_pct !== null && r.error_rate_pct !== undefined
+                ? Number(r.error_rate_pct)
+                : null,
           })
           .onConflictDoNothing({
             target: [metricSamples.siteId, metricSamples.measuredAt],
@@ -227,6 +215,11 @@ agentRouter.post(
       }
 
       // 2. Upsert devices on (site_id, mac)
+      // Devices found in a site's first 10 minutes after registration are treated as known with no alert.
+      const tenMinutesMs = 10 * 60 * 1000;
+      const isInitialDiscoveryWindow =
+        now.getTime() - new Date(agent.createdAt).getTime() <= tenMinutesMs;
+
       const devicesList = Array.isArray(incomingDevices) ? incomingDevices : [];
       for (const d of devicesList) {
         if (!d.mac || !d.ip) continue;
@@ -240,7 +233,7 @@ agentRouter.post(
             hostname: String(d.hostname || 'unknown').trim(),
             vendor: String(d.vendor || 'Unknown').trim(),
             online: Boolean(d.online),
-            isKnown: false,
+            isKnown: isInitialDiscoveryWindow,
             firstSeenAt: now,
             lastSeenAt: now,
           })
