@@ -11,3 +11,5 @@
 | 2026-10-23 | Claude (claude.ai chat) | Code for _send_part (split-and-retry on 400/413) | Reviewed, added and ran all sender tests |
 | 2026-10-23 | Claude Code | Command poller, saved command state, result storage and resend loop (except result_action), fake cloud /debug/commands endpoint, tests | Reviewed the plan; checked unknown types are refused and fixes never run twice; ran all tests and the live checks |
 | 2026-10-23 | Claude (claude.ai chat) | Code for result_action (maps the cloud's reply to recorded, drop or retry) | Reviewed, added and tested it; chose the allowed command list and the retry rules |
+| 2026-10-23 | Claude Code | Demo fault switch (flag and file) (except apply_fault), on/off logging, settings, send-line values, tests | Reviewed the plan; ran all tests and the live on/off checks |
+| 2026-10-23 | Claude (claude.ai chat) | Code for apply_fault (applies the fault to a copy of the reading) | Reviewed, added and tested it; fixed an indentation error when pasting |

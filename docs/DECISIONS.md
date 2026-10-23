@@ -60,3 +60,9 @@ Context: the cloud's reply to a fix result decides whether the agent keeps it.
 Options: retry everything; drop everything that isn't a success; decide by status code.
 Choice: 2xx and 409 mean recorded. 408, 429 and 5xx mean retry next cycle. Other 4xx (such as 400 and 404) mean drop, log it and save to rejected.jsonl.
 Reason: temporary cloud problems are retried, but a request the cloud says is wrong is never retried forever.
+
+## D-011: How the demo fault works
+Context: the demo needs a network problem on cue, so the audience can see SignalBloom detect it, explain it and recover.
+Options: restart the agent with a flag; a switch that works while the agent is running; a separate fault simulator.
+Choice: --demo-fault starts the agent with the fault on, and creating or deleting a file named demo_fault in data_dir turns it on or off within 30 seconds without a restart. While on, latency rises by 300 ms and packet loss by 20 percentage points (capped at 100). Off by default.
+Reason: the fault can start at the right moment in the demo. Readings carry no demo marker, so the cloud reacts exactly as it would to a real problem.

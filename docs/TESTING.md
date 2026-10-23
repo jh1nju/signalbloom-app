@@ -9,3 +9,6 @@
 | 2026-10-23 | Fix for a device not on the network | Pass | Made-up MAC reported as failed with a clear message |
 | 2026-10-23 | Unsupported command type | Pass | delete_files refused as "Unsupported command type"; nothing ran |
 | 2026-10-23 | Fix result during a cloud outage | Pass | Result arrived after the fake cloud restarted; the agent log shows the fix ran once |
+| 2026-10-23 | Demo fault unit tests | Pass | 16 tests: readings unchanged when off, changed with the flag or the file, loss capped at 100, normal after turning off |
+| 2026-10-23 | Demo fault on during a live run | Pass | Created data\demo_fault; within 30 s the agent logged DEMO FAULT ON and latency rose by about 300 ms |
+| 2026-10-23 | Demo fault off during a live run | Pass | Deleted the file; within 30 s the agent logged the fault off and readings returned to normal |

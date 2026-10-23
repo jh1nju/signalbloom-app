@@ -1,0 +1,7 @@
+# Known Limitations
+
+- Registration: if registration succeeds but the reply is lost, the setup code is used up and the user needs a new one. A production version would allow a short retry window on the server.
+- Device status: devices that never answer ping (for example firewalled PCs) rely on the ARP table, so they can take several minutes to show as offline.
+- One-click fixes (restart, isolate, reconnect device) are simulated in the prototype. The command round trip is real, but no device is actually changed.
+- The demo fault changes readings on purpose to show a network problem on cue. It is only active when switched on.
+- The agent was tested against a local fake cloud that follows API.md. It connects to the real cloud app once the app is published in Phase 6.
