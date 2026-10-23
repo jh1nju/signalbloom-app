@@ -42,3 +42,21 @@ Context: the cloud returns 400 invalid_body for a reading it can't accept, and a
 Options: drop the whole batch; keep it in the buffer; split the batch to find the bad reading.
 Choice: split the batch until the bad reading is isolated, drop only that reading, and save it to rejected.jsonl. If a single reading is still rejected, retry it once without the device list, in case the device list is the problem.
 Reason: one bad reading can't block the queue or throw away hundreds of good ones, and the saved file shows exactly what the cloud rejected.
+
+## D-008: The agent only runs three known commands
+Context: the cloud can send commands to the agent to carry out approved one-click fixes. An agent that runs whatever the cloud sends would let anyone who took over the cloud or a site token control the customer's network.
+Options: run any command the cloud sends; allow a fixed list of command types.
+Choice: only restart_device, isolate_device and reconnect_device are allowed. Anything else is refused, reported as "Unsupported command type" and logged. In the prototype all three fixes are simulated.
+Reason: a fixed list keeps the customer's network safe even if the cloud is compromised. Values like "rm -rf /" and "exec" are tested and refused.
+
+## D-009: A fix never runs twice
+Context: the agent's report of a fix result can be lost if the cloud is unreachable, and the cloud could send the same command again.
+Options: re-run the fix when unsure; save each command's state and only resend the result.
+Choice: handled command IDs and their results are saved before the fix runs. A lost result is resent next cycle without re-running the fix. If the agent stops mid-fix, the fix is reported as failed, not run again.
+Reason: running a fix like "restart device" twice could disrupt the office, while resending a result is harmless.
+
+## D-010: What happens after the cloud answers a fix result
+Context: the cloud's reply to a fix result decides whether the agent keeps it.
+Options: retry everything; drop everything that isn't a success; decide by status code.
+Choice: 2xx and 409 mean recorded. 408, 429 and 5xx mean retry next cycle. Other 4xx (such as 400 and 404) mean drop, log it and save to rejected.jsonl.
+Reason: temporary cloud problems are retried, but a request the cloud says is wrong is never retried forever.

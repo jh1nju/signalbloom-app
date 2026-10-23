@@ -9,3 +9,5 @@
 | 2026-10-22 | Claude (claude.ai chat) | Code for _validate (config checks), retry_wait (registration retry waits) and _is_online (ping-or-ARP rule) | Reviewed, added and tested each one; chose the config rules and the online rule |
 | 2026-10-23 | Claude Code | Main loop, sender (except _send_part), buffer, fake cloud changes | Chose the bandwidth test timing and the 400-splitting rule |
 | 2026-10-23 | Claude (claude.ai chat) | Code for _send_part (split-and-retry on 400/413) | Reviewed, added and ran all sender tests; chose the bandwidth timing and 400-splitting rules |
+| 2026-10-23 | Claude Code | Command poller, saved command state, result retry, fake cloud /debug/commands endpoint, tests | Reviewed the plan; checked unknown types are refused and fixes never run twice; ran all tests and the live checks |
+| 2026-10-23 | Claude (claude.ai chat) | Code for result_action (maps the cloud's reply to recorded, drop or retry) | Reviewed, added and tested it; chose the allowed command list and the retry rules |
