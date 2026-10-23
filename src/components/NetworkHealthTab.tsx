@@ -52,6 +52,16 @@ interface HealthResponse {
   };
 }
 
+export interface RecommendationCommandStatus {
+  id: string;
+  type: 'restart_device' | 'isolate_device' | 'reconnect_device';
+  targetMac: string;
+  status: 'pending' | 'sent' | 'succeeded' | 'failed';
+  approvedAt: string;
+  finishedAt: string | null;
+  resultMessage: string | null;
+}
+
 export interface AlertRecommendationItem {
   id: string;
   alertId: string;
@@ -60,6 +70,10 @@ export interface AlertRecommendationItem {
   actionText: string;
   commandType: 'restart_device' | 'isolate_device' | 'reconnect_device' | null;
   targetMac: string | null;
+  targetDeviceName?: string | null;
+  selfHandled?: boolean;
+  command?: RecommendationCommandStatus | null;
+  deviceHasPendingCommand?: boolean;
 }
 
 export interface AlertItem {
@@ -91,11 +105,39 @@ interface AlertsResponse {
   lastEvaluatedAt: string;
 }
 
-const COMMAND_LABELS: Record<string, string> = {
-  restart_device: 'Restart device',
-  isolate_device: 'Isolate device',
-  reconnect_device: 'Reconnect device',
-};
+function getActionVerbCapitalized(commandType: string | null | undefined): string {
+  if (commandType === 'isolate_device') return 'Isolate';
+  if (commandType === 'reconnect_device') return 'Reconnect';
+  return 'Restart';
+}
+
+function getFixStatusLabel(status: 'pending' | 'sent' | 'succeeded' | 'failed'): {
+  label: string;
+  badgeClass: string;
+} {
+  if (status === 'pending') {
+    return {
+      label: 'Waiting for the agent',
+      badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
+    };
+  }
+  if (status === 'sent') {
+    return {
+      label: 'Running',
+      badgeClass: 'bg-sky-50 text-sky-800 border-sky-200',
+    };
+  }
+  if (status === 'succeeded') {
+    return {
+      label: 'Done',
+      badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    };
+  }
+  return {
+    label: "Didn't work",
+    badgeClass: 'bg-rose-50 text-rose-800 border-rose-200',
+  };
+}
 
 export function buildClientBasicExplanation(rule: string, reason: string): string {
   const cleanReason = (reason || '').trim().replace(/\.+$/, '');
@@ -149,6 +191,10 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
     recommendations:
       serverRecs.length > 0 ? serverRecs : (cached?.recommendations ?? []),
   }));
+
+  const [confirmingRecId, setConfirmingRecId] = useState<string | null>(null);
+  const [submittingRecId, setSubmittingRecId] = useState<string | null>(null);
+  const [actionErrorByRecId, setActionErrorByRecId] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (alert.severity !== 'critical' && alert.severity !== 'warning') {
@@ -259,14 +305,163 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
     cacheKey,
   ]);
 
+  const recs =
+    localAi.recommendations.length > 0 ? localAi.recommendations : serverRecs;
+  const explanation =
+    localAi.explanation || serverExplanation || recs[0]?.explanation || null;
+
+  const hasActiveFix = recs.some(
+    (r) =>
+      r.command &&
+      (r.command.status === 'pending' || r.command.status === 'sent')
+  );
+
+  // Poll every 5 seconds when any recommendation on this card has an active fix (pending or sent)
+  useEffect(() => {
+    if (!hasActiveFix) return;
+
+    let cancelled = false;
+    const refreshAlertStatus = async () => {
+      try {
+        const res = await fetch(
+          `/api/sites/${encodeURIComponent(alert.siteId)}/alerts/${encodeURIComponent(alert.id)}/explain`,
+          { method: 'POST' }
+        );
+        if (!res.ok || cancelled) return;
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) return;
+        const json = await res.json();
+        if (cancelled) return;
+        if (Array.isArray(json?.recommendations) && json.recommendations.length > 0) {
+          const updated = {
+            explanation: json.explanation || explanation || '',
+            recommendations: json.recommendations,
+          };
+          clientAlertAiCache.set(cacheKey, updated);
+          setLocalAi(updated);
+        }
+      } catch {
+        // Ignore transient poll errors
+      }
+    };
+
+    const interval = setInterval(refreshAlertStatus, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [hasActiveFix, alert.siteId, alert.id, cacheKey, explanation]);
+
+  const handleSelfHandle = async (rec: AlertRecommendationItem) => {
+    setSubmittingRecId(rec.id);
+    setActionErrorByRecId((prev) => ({ ...prev, [rec.id]: '' }));
+    try {
+      const res = await fetch(
+        `/api/sites/${encodeURIComponent(alert.siteId)}/recommendations/${encodeURIComponent(rec.id)}/self-handle`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+      if (res.ok) {
+        setConfirmingRecId(null);
+        setLocalAi((prev) => {
+          const updatedRecs = prev.recommendations.map((item) =>
+            item.id === rec.id ? { ...item, selfHandled: true } : item
+          );
+          const nextState = { ...prev, recommendations: updatedRecs };
+          if (nextState.explanation) {
+            clientAlertAiCache.set(cacheKey, {
+              explanation: nextState.explanation,
+              recommendations: updatedRecs,
+            });
+          }
+          return nextState;
+        });
+      } else {
+        const data = await res.json().catch(() => null);
+        setActionErrorByRecId((prev) => ({
+          ...prev,
+          [rec.id]: data?.error?.message || 'Could not save your choice.',
+        }));
+      }
+    } catch {
+      setActionErrorByRecId((prev) => ({
+        ...prev,
+        [rec.id]: 'Could not save your choice.',
+      }));
+    } finally {
+      setSubmittingRecId(null);
+    }
+  };
+
+  const handleConfirmApproveFix = async (rec: AlertRecommendationItem) => {
+    setSubmittingRecId(rec.id);
+    setActionErrorByRecId((prev) => ({ ...prev, [rec.id]: '' }));
+    try {
+      const res = await fetch(
+        `/api/sites/${encodeURIComponent(alert.siteId)}/recommendations/${encodeURIComponent(rec.id)}/approve`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_mac: rec.targetMac }),
+        }
+      );
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data?.command) {
+        setConfirmingRecId(null);
+        setLocalAi((prev) => {
+          const updatedRecs = prev.recommendations.map((item) => {
+            if (item.id === rec.id) {
+              return {
+                ...item,
+                command: data.command,
+                targetDeviceName: data.deviceName || item.targetDeviceName,
+                deviceHasPendingCommand: true,
+              };
+            }
+            if (
+              item.commandType === rec.commandType &&
+              item.targetMac &&
+              rec.targetMac &&
+              item.targetMac.toLowerCase() === rec.targetMac.toLowerCase()
+            ) {
+              return { ...item, deviceHasPendingCommand: true };
+            }
+            return item;
+          });
+          const nextState = { ...prev, recommendations: updatedRecs };
+          if (nextState.explanation) {
+            clientAlertAiCache.set(cacheKey, {
+              explanation: nextState.explanation,
+              recommendations: updatedRecs,
+            });
+          }
+          return nextState;
+        });
+      } else {
+        setActionErrorByRecId((prev) => ({
+          ...prev,
+          [rec.id]:
+            data?.error?.message ||
+            'A pending fix of this type is already waiting for the agent on this device.',
+        }));
+        setConfirmingRecId(null);
+      }
+    } catch {
+      setActionErrorByRecId((prev) => ({
+        ...prev,
+        [rec.id]: 'Could not approve fix right now.',
+      }));
+    } finally {
+      setSubmittingRecId(null);
+    }
+  };
+
   if (alert.severity !== 'critical' && alert.severity !== 'warning') {
     return null;
   }
-
-  const recs =
-    serverRecs.length > 0 ? serverRecs : localAi.recommendations;
-  const explanation =
-    serverExplanation || localAi.explanation || recs[0]?.explanation || null;
 
   if (!explanation) {
     const basicExplanation =
@@ -299,26 +494,149 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
           <div className="text-xs font-bold text-slate-800">
             What you can do
           </div>
-          <ol className="space-y-1.5">
-            {recs.map((rec, idx) => (
-              <li
-                key={rec.id || idx}
-                className="text-xs sm:text-sm text-slate-700 bg-white/75 rounded-xl px-3 py-2 border border-black/[0.05] flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-              >
-                <div className="flex items-start gap-2">
-                  <span className="font-bold text-slate-500 shrink-0">
-                    {rec.rank || idx + 1}.
-                  </span>
-                  <span>{rec.actionText}</span>
-                </div>
-                {rec.commandType && (
-                  <span className="text-[11px] font-medium text-slate-600 shrink-0">
-                    {COMMAND_LABELS[rec.commandType] || rec.commandType}
-                    {rec.targetMac ? ` · ${rec.targetMac}` : ''}
-                  </span>
-                )}
-              </li>
-            ))}
+          <ol className="space-y-2">
+            {recs.map((rec, idx) => {
+              const hasFixAction = Boolean(rec.commandType && rec.targetMac);
+              const deviceDisplay =
+                rec.targetDeviceName || rec.targetMac || 'this device';
+              const verbCap = getActionVerbCapitalized(rec.commandType);
+              const isConfirming = confirmingRecId === rec.id;
+              const isSubmitting = submittingRecId === rec.id;
+              const cmd = rec.command ?? null;
+              const isSelfHandled = Boolean(rec.selfHandled) && !cmd;
+              const blockedByOtherPending =
+                !cmd && !isSelfHandled && Boolean(rec.deviceHasPendingCommand);
+              const errText = actionErrorByRecId[rec.id];
+
+              return (
+                <li
+                  key={rec.id || idx}
+                  className="text-xs sm:text-sm text-slate-700 bg-white/80 rounded-xl px-3.5 py-2.5 border border-black/[0.06] space-y-2"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-slate-500 shrink-0">
+                        {rec.rank || idx + 1}.
+                      </span>
+                      <span>{rec.actionText}</span>
+                    </div>
+
+                    {/* Recommendations without a command_type show only the text */}
+                    {hasFixAction && !cmd && !isSelfHandled && !isConfirming && (
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <span className="text-[11px] font-medium text-slate-500 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                          Simulated in this prototype
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => handleSelfHandle(rec)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 shadow-2xs transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          I&apos;ll do it myself
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSubmitting || blockedByOtherPending}
+                          onClick={() => setConfirmingRecId(rec.id)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-teal-600 hover:bg-teal-700 border border-teal-700 shadow-2xs transition-colors disabled:opacity-50 cursor-pointer"
+                          title={
+                            blockedByOtherPending
+                              ? 'A pending fix of this type is already waiting for the agent on this device.'
+                              : undefined
+                          }
+                        >
+                          Approve fix
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Confirmation prompt when "Approve fix" is clicked */}
+                  {hasFixAction && isConfirming && !cmd && (
+                    <div className="rounded-xl bg-slate-50/95 border border-slate-200 p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <p className="text-xs sm:text-sm font-semibold text-slate-900">
+                          {verbCap} {deviceDisplay}? SignalBloom will ask the agent at this site to do it.
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          Simulated in this prototype
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => setConfirmingRecId(null)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 transition-colors cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSubmitting}
+                          onClick={() => handleConfirmApproveFix(rec)}
+                          className="px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-teal-600 hover:bg-teal-700 border border-teal-700 transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSubmitting ? 'Approving...' : 'Confirm'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Self-handled status */}
+                  {hasFixAction && isSelfHandled && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-black/[0.05]">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">
+                        I&apos;ll do it myself · Handled by you
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-500">
+                        Simulated in this prototype
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Command fix status (refreshes every 5 seconds while pending or sent) */}
+                  {hasFixAction && cmd && (
+                    <div className="pt-1.5 border-t border-black/[0.05] flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {(() => {
+                          const { label, badgeClass } = getFixStatusLabel(cmd.status);
+                          return (
+                            <span
+                              className={`inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-0.5 rounded-full border ${badgeClass}`}
+                            >
+                              {(cmd.status === 'pending' || cmd.status === 'sent') && (
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                              )}
+                              <span>{label}</span>
+                            </span>
+                          );
+                        })()}
+                        {cmd.resultMessage && (
+                          <span className="text-xs text-slate-700 font-medium">
+                            {cmd.resultMessage}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-medium text-slate-500 shrink-0">
+                        Simulated in this prototype
+                      </span>
+                    </div>
+                  )}
+
+                  {blockedByOtherPending && !errText && (
+                    <p className="text-[11px] text-amber-700">
+                      A pending fix for {deviceDisplay} is already waiting for the agent.
+                    </p>
+                  )}
+
+                  {errText && (
+                    <p className="text-[11px] text-rose-600 font-medium">{errText}</p>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}

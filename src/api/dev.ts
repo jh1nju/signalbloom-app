@@ -1,12 +1,16 @@
 import { Router, Request, Response } from 'express';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.ts';
-import { setupCodes, sites } from '../db/schema.ts';
+import { agents, auditLog, commands, devices, setupCodes, sites } from '../db/schema.ts';
 import {
   getAllSimulatedFaults,
   getSimulatedFaultStatus,
   startSimulatedFault,
 } from '../services/alertEngine.ts';
+import {
+  formatDeviceFriendlyName,
+  getCommandNounLower,
+} from '../services/geminiService.ts';
 
 export const devRouter = Router();
 
@@ -80,3 +84,128 @@ devRouter.get('/simulate-fault', async (req: Request, res: Response) => {
   }
   return res.json({ faults: getAllSimulatedFaults() });
 });
+
+// POST /api/dev/simulate-agent-result
+// Finds the newest pending command: marks it sent, waits 3 seconds, then marks it succeeded
+// with "Simulated restart of <device> completed." and writes the audit_log row,
+// matching POST /api/agent/commands/:id/result.
+devRouter.post('/simulate-agent-result', async (req: Request, res: Response) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({
+      error: { code: 'not_found', message: 'Not available in production.' },
+    });
+  }
+
+  try {
+    const requestedSiteId = req.body?.site_id || req.body?.siteId;
+
+    let pendingCmd: typeof commands.$inferSelect | undefined;
+
+    if (requestedSiteId) {
+      const [sitePending] = await db
+        .select()
+        .from(commands)
+        .where(and(eq(commands.siteId, requestedSiteId), eq(commands.status, 'pending')))
+        .orderBy(desc(commands.approvedAt))
+        .limit(1);
+      pendingCmd = sitePending;
+    }
+
+    if (!pendingCmd) {
+      const [anyPending] = await db
+        .select()
+        .from(commands)
+        .where(eq(commands.status, 'pending'))
+        .orderBy(desc(commands.approvedAt))
+        .limit(1);
+      pendingCmd = anyPending;
+    }
+
+    if (!pendingCmd) {
+      return res.status(404).json({
+        error: {
+          code: 'no_pending_command',
+          message: 'No pending command found. Approve a fix on an alert card first.',
+        },
+      });
+    }
+
+    const [[site], [siteAgent], siteDevices] = await Promise.all([
+      db.select().from(sites).where(eq(sites.id, pendingCmd.siteId)).limit(1),
+      db.select().from(agents).where(eq(agents.siteId, pendingCmd.siteId)).limit(1),
+      db.select().from(devices).where(eq(devices.siteId, pendingCmd.siteId)),
+    ]);
+
+    const matchedDev = siteDevices.find(
+      (d) => d.mac.toLowerCase() === pendingCmd!.targetMac.toLowerCase()
+    );
+    const deviceName = formatDeviceFriendlyName(matchedDev?.hostname, pendingCmd.targetMac);
+    const actionNoun = getCommandNounLower(pendingCmd.type);
+
+    // 1. Mark command as 'sent'
+    await db
+      .update(commands)
+      .set({ status: 'sent' })
+      .where(eq(commands.id, pendingCmd.id));
+
+    // 2. Wait 3 seconds
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    // 3. Mark command as 'succeeded' with "Simulated restart of <device> completed."
+    const finishedTime = new Date();
+    const resultMessage = `Simulated ${actionNoun} of ${deviceName} completed.`;
+
+    await db
+      .update(commands)
+      .set({
+        status: 'succeeded',
+        finishedAt: finishedTime,
+        resultMessage,
+      })
+      .where(eq(commands.id, pendingCmd.id));
+
+    // 4. Write audit_log row, exactly as the agent's result endpoint would
+    if (site) {
+      await db.insert(auditLog).values({
+        organisationId: site.organisationId,
+        siteId: pendingCmd.siteId,
+        actorType: 'agent',
+        actorId: siteAgent?.id ?? null,
+        action: 'command_result_reported',
+        details: {
+          command_id: pendingCmd.id,
+          command_type: pendingCmd.type,
+          target_mac: pendingCmd.targetMac,
+          device_name: deviceName,
+          status: 'succeeded',
+          finished_at: finishedTime.toISOString(),
+          message: resultMessage,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      recorded: true,
+      simulated_result: {
+        command_id: pendingCmd.id,
+        site_id: pendingCmd.siteId,
+        site_name: site?.name ?? null,
+        command_type: pendingCmd.type,
+        target_mac: pendingCmd.targetMac,
+        device_name: deviceName,
+        status: 'succeeded',
+        finished_at: finishedTime.toISOString(),
+        message: resultMessage,
+      },
+    });
+  } catch (err: any) {
+    console.error('Failed to simulate agent result:', err);
+    return res.status(500).json({
+      error: {
+        code: 'server_error',
+        message: err.message || 'Could not simulate agent result.',
+      },
+    });
+  }
+});
+

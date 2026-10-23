@@ -11,6 +11,7 @@ import { NetworkHealthTab } from './components/NetworkHealthTab';
 import { DevicesTab } from './components/DevicesTab';
 import { SecurityTab } from './components/SecurityTab';
 import { AiAssistantTab } from './components/AiAssistantTab';
+import { AccountSettingsTab } from './components/AccountSettingsTab';
 import { DevApiTest } from './components/DevApiTest';
 import { Terminal } from 'lucide-react';
 
@@ -142,6 +143,12 @@ export default function App() {
             <AiAssistantTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
+            />
+          ) : currentTab === 'settings' ? (
+            <AccountSettingsTab
+              siteId={selectedSiteId}
+              siteName={activeSite?.name || 'Selected site'}
+              organisationName={organisationName}
             />
           ) : (
             <TabPlaceholder tab={activeTabItem} currentSite={activeSite} />

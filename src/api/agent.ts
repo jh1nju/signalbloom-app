@@ -11,6 +11,7 @@ import {
   commands,
   auditLog,
 } from '../db/schema.ts';
+import { formatDeviceFriendlyName } from '../services/geminiService.ts';
 
 export const agentRouter = Router();
 
@@ -357,11 +358,19 @@ agentRouter.post(
         })
         .where(eq(commands.id, commandId));
 
-      // Fetch site to obtain organisationId for audit_log
-      const [site] = await db
-        .select({ organisationId: sites.organisationId })
-        .from(sites)
-        .where(eq(sites.id, agent.siteId));
+      // Fetch site and device to obtain organisationId and friendly device name for audit_log
+      const [[site], siteDevices] = await Promise.all([
+        db
+          .select({ organisationId: sites.organisationId })
+          .from(sites)
+          .where(eq(sites.id, agent.siteId)),
+        db.select().from(devices).where(eq(devices.siteId, agent.siteId)),
+      ]);
+
+      const matchedDev = siteDevices.find(
+        (d) => d.mac.toLowerCase() === cmd.targetMac.toLowerCase()
+      );
+      const deviceName = formatDeviceFriendlyName(matchedDev?.hostname, cmd.targetMac);
 
       if (site) {
         await db.insert(auditLog).values({
@@ -374,6 +383,7 @@ agentRouter.post(
             command_id: commandId,
             command_type: cmd.type,
             target_mac: cmd.targetMac,
+            device_name: deviceName,
             status,
             finished_at: finishedTime.toISOString(),
             message: message || null,

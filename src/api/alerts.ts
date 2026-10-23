@@ -1,14 +1,26 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/index.ts';
-import { alerts } from '../db/schema.ts';
+import {
+  alerts,
+  auditLog,
+  commands,
+  devices,
+  recommendations,
+  sites,
+  users,
+} from '../db/schema.ts';
 import { and, desc, eq } from 'drizzle-orm';
 import { decodeAlertTitleAndReason } from '../services/alertEngine.ts';
 import {
   AI_UNAVAILABLE_MESSAGE,
   buildBasicAlertExplanation,
+  formatDeviceFriendlyName,
   FormattedRecommendation,
+  getCommandNounLower,
+  getCommandVerbLower,
   getOrGenerateAlertRecommendations,
   getSavedAlertRecommendations,
+  resolveRecommendationTargetDevice,
 } from '../services/geminiService.ts';
 
 export const alertsRouter = Router();
@@ -54,8 +66,7 @@ function formatAlertRow(
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // GET /api/sites/:siteId/alerts
-// Returns site alerts along with any already-saved AI explanations from the recommendations table
-// without triggering background Gemini generation.
+// Returns site alerts along with saved explanations/recommendations and their live fix status.
 alertsRouter.get('/sites/:siteId/alerts', async (req: Request, res: Response) => {
   const { siteId } = req.params;
 
@@ -96,6 +107,7 @@ alertsRouter.get('/sites/:siteId/alerts', async (req: Request, res: Response) =>
     for (const row of openCriticalOrWarning) {
       const { reason } = decodeAlertTitleAndReason(row.rule, row.severity, row.reason);
       const savedResult = await getSavedAlertRecommendations({
+        siteId,
         alertId: row.id,
         severity: row.severity,
         rule: row.rule,
@@ -159,8 +171,6 @@ alertsRouter.get('/sites/:siteId/alerts', async (req: Request, res: Response) =>
 });
 
 // POST /api/sites/:siteId/alerts/:alertId/explain
-// Generates an AI explanation and up to 3 recommendations on-demand when an alert card
-// is first shown on screen, saves them in the recommendations table, and reuses them thereafter.
 alertsRouter.post(
   '/sites/:siteId/alerts/:alertId/explain',
   async (req: Request, res: Response) => {
@@ -226,3 +236,424 @@ alertsRouter.post(
     }
   }
 );
+
+// POST /api/sites/:siteId/recommendations/:recommendationId/approve
+// Creates a pending command for the recommendation's command_type and target_mac,
+// prevents a second pending fix for the same device and type, and writes an audit_log row.
+alertsRouter.post(
+  '/sites/:siteId/recommendations/:recommendationId/approve',
+  async (req: Request, res: Response) => {
+    const { siteId, recommendationId } = req.params;
+
+    if (
+      !siteId ||
+      !UUID_REGEX.test(siteId) ||
+      !recommendationId ||
+      !UUID_REGEX.test(recommendationId)
+    ) {
+      return res.status(400).json({
+        error: {
+          code: 'invalid_parameters',
+          message: 'Valid siteId and recommendationId are required.',
+        },
+      });
+    }
+
+    try {
+      const [rec] = await db
+        .select()
+        .from(recommendations)
+        .where(eq(recommendations.id, recommendationId))
+        .limit(1);
+
+      if (!rec) {
+        return res.status(404).json({
+          error: {
+            code: 'recommendation_not_found',
+            message: 'Recommendation not found.',
+          },
+        });
+      }
+
+      const [alertRow] = await db
+        .select()
+        .from(alerts)
+        .where(and(eq(alerts.id, rec.alertId), eq(alerts.siteId, siteId)))
+        .limit(1);
+
+      if (!alertRow) {
+        return res.status(404).json({
+          error: {
+            code: 'alert_not_found',
+            message: 'Alert not found for this site.',
+          },
+        });
+      }
+
+      if (!rec.commandType) {
+        return res.status(400).json({
+          error: {
+            code: 'no_command_type',
+            message: 'This recommendation does not have an automated device fix.',
+          },
+        });
+      }
+
+      const siteDevices = await db.select().from(devices).where(eq(devices.siteId, siteId));
+
+      const resolved = await resolveRecommendationTargetDevice({
+        siteId,
+        recommendationId: rec.id,
+        actionText: rec.actionText,
+        commandType: rec.commandType,
+        alertDeviceId: alertRow.deviceId,
+        siteDevices,
+        existingCommandMac:
+          typeof req.body?.target_mac === 'string' && req.body.target_mac.trim()
+            ? req.body.target_mac.trim()
+            : null,
+      });
+
+      const targetMac = resolved.targetMac;
+      if (!targetMac) {
+        return res.status(400).json({
+          error: {
+            code: 'missing_target_mac',
+            message: 'No target device MAC address is available for this fix.',
+          },
+        });
+      }
+
+      const targetDeviceName =
+        resolved.targetDeviceName || formatDeviceFriendlyName(null, targetMac);
+
+      // Duplicate guard: never allow a second pending fix for the same device and type
+      const existingSitePending = await db
+        .select()
+        .from(commands)
+        .where(
+          and(
+            eq(commands.siteId, siteId),
+            eq(commands.type, rec.commandType),
+            eq(commands.status, 'pending')
+          )
+        );
+
+      const duplicatePending = existingSitePending.find(
+        (c) => c.targetMac.toLowerCase() === targetMac.toLowerCase()
+      );
+
+      if (duplicatePending) {
+        return res.status(409).json({
+          error: {
+            code: 'duplicate_pending_fix',
+            message: 'A pending fix of this type is already waiting for the agent on this device.',
+          },
+          command: {
+            id: duplicatePending.id,
+            type: duplicatePending.type,
+            targetMac: duplicatePending.targetMac,
+            status: duplicatePending.status,
+            approvedAt: new Date(duplicatePending.approvedAt).toISOString(),
+            finishedAt: duplicatePending.finishedAt
+              ? new Date(duplicatePending.finishedAt).toISOString()
+              : null,
+            resultMessage: duplicatePending.resultMessage ?? null,
+          },
+        });
+      }
+
+      const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
+      if (!site) {
+        return res.status(404).json({
+          error: { code: 'site_not_found', message: 'Site not found.' },
+        });
+      }
+
+      const orgUsers = await db
+        .select()
+        .from(users)
+        .where(eq(users.organisationId, site.organisationId));
+      const actingUser = orgUsers.find((u) => u.role === 'admin') || orgUsers[0];
+      if (!actingUser) {
+        return res.status(500).json({
+          error: { code: 'no_user', message: 'No organisation user found to approve command.' },
+        });
+      }
+
+      const approvedAt = new Date();
+
+      const [createdCmd] = await db
+        .insert(commands)
+        .values({
+          siteId,
+          recommendationId: rec.id,
+          type: rec.commandType,
+          targetMac,
+          status: 'pending',
+          approvedByUserId: actingUser.id,
+          approvedAt,
+        })
+        .returning();
+
+      await db.insert(auditLog).values({
+        organisationId: site.organisationId,
+        siteId,
+        actorType: 'user',
+        actorId: actingUser.id,
+        action: 'fix_approved',
+        details: {
+          recommendation_id: rec.id,
+          alert_id: rec.alertId,
+          command_id: createdCmd.id,
+          command_type: rec.commandType,
+          target_mac: targetMac,
+          device_name: targetDeviceName,
+          approved_at: approvedAt.toISOString(),
+        },
+      });
+
+      return res.status(201).json({
+        command: {
+          id: createdCmd.id,
+          type: createdCmd.type,
+          targetMac: createdCmd.targetMac,
+          status: createdCmd.status,
+          approvedAt: new Date(createdCmd.approvedAt).toISOString(),
+          finishedAt: null,
+          resultMessage: null,
+        },
+        deviceName: targetDeviceName,
+      });
+    } catch (err: any) {
+      console.error('Failed to approve fix:', err);
+      return res.status(500).json({
+        error: {
+          code: 'server_error',
+          message: 'Failed to approve fix.',
+        },
+      });
+    }
+  }
+);
+
+// POST /api/sites/:siteId/recommendations/:recommendationId/self-handle
+// Marks the recommendation as handled by the user ("I'll do it myself"), with no command created,
+// and writes an audit_log row.
+alertsRouter.post(
+  '/sites/:siteId/recommendations/:recommendationId/self-handle',
+  async (req: Request, res: Response) => {
+    const { siteId, recommendationId } = req.params;
+
+    if (
+      !siteId ||
+      !UUID_REGEX.test(siteId) ||
+      !recommendationId ||
+      !UUID_REGEX.test(recommendationId)
+    ) {
+      return res.status(400).json({
+        error: {
+          code: 'invalid_parameters',
+          message: 'Valid siteId and recommendationId are required.',
+        },
+      });
+    }
+
+    try {
+      const [rec] = await db
+        .select()
+        .from(recommendations)
+        .where(eq(recommendations.id, recommendationId))
+        .limit(1);
+
+      if (!rec) {
+        return res.status(404).json({
+          error: {
+            code: 'recommendation_not_found',
+            message: 'Recommendation not found.',
+          },
+        });
+      }
+
+      const [alertRow] = await db
+        .select()
+        .from(alerts)
+        .where(and(eq(alerts.id, rec.alertId), eq(alerts.siteId, siteId)))
+        .limit(1);
+
+      if (!alertRow) {
+        return res.status(404).json({
+          error: {
+            code: 'alert_not_found',
+            message: 'Alert not found for this site.',
+          },
+        });
+      }
+
+      const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
+      if (!site) {
+        return res.status(404).json({
+          error: { code: 'site_not_found', message: 'Site not found.' },
+        });
+      }
+
+      const orgUsers = await db
+        .select()
+        .from(users)
+        .where(eq(users.organisationId, site.organisationId));
+      const actingUser = orgUsers.find((u) => u.role === 'admin') || orgUsers[0];
+
+      const siteDevices = await db.select().from(devices).where(eq(devices.siteId, siteId));
+      const resolved = await resolveRecommendationTargetDevice({
+        siteId,
+        recommendationId: rec.id,
+        actionText: rec.actionText,
+        commandType: rec.commandType,
+        alertDeviceId: alertRow.deviceId,
+        siteDevices,
+      });
+
+      const targetMac = resolved.targetMac;
+      const targetDeviceName =
+        resolved.targetDeviceName ||
+        (targetMac ? formatDeviceFriendlyName(null, targetMac) : 'device');
+
+      const existingLogs = await db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.siteId, siteId), eq(auditLog.action, 'fix_self_handled')));
+
+      const alreadyLogged = existingLogs.some((l) => {
+        const d = (l.details || {}) as Record<string, any>;
+        return d.recommendation_id === rec.id;
+      });
+
+      const handledAt = new Date();
+
+      if (!alreadyLogged) {
+        await db.insert(auditLog).values({
+          organisationId: site.organisationId,
+          siteId,
+          actorType: 'user',
+          actorId: actingUser?.id ?? null,
+          action: 'fix_self_handled',
+          details: {
+            recommendation_id: rec.id,
+            alert_id: rec.alertId,
+            command_type: rec.commandType,
+            target_mac: targetMac,
+            device_name: targetDeviceName,
+            handled_at: handledAt.toISOString(),
+          },
+        });
+      }
+
+      return res.status(200).json({
+        selfHandled: true,
+        recommendationId: rec.id,
+        handledAt: handledAt.toISOString(),
+      });
+    } catch (err: any) {
+      console.error('Failed to mark recommendation as self-handled:', err);
+      return res.status(500).json({
+        error: {
+          code: 'server_error',
+          message: 'Failed to update recommendation.',
+        },
+      });
+    }
+  }
+);
+
+// GET /api/sites/:siteId/activity-log
+// Lists audit_log rows for the selected site, newest first, formatted in plain words.
+alertsRouter.get('/sites/:siteId/activity-log', async (req: Request, res: Response) => {
+  const { siteId } = req.params;
+
+  if (!siteId || !UUID_REGEX.test(siteId)) {
+    return res.status(400).json({
+      error: {
+        code: 'invalid_site_id',
+        message: 'A valid site ID is required.',
+      },
+    });
+  }
+
+  try {
+    const [logs, siteDevices] = await Promise.all([
+      db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.siteId, siteId))
+        .orderBy(desc(auditLog.createdAt))
+        .limit(100),
+      db.select().from(devices).where(eq(devices.siteId, siteId)),
+    ]);
+
+    const items = logs.map((row) => {
+      const details = (row.details || {}) as Record<string, any>;
+      const commandType = details.command_type as string | undefined;
+      const targetMac = details.target_mac as string | undefined;
+      const matchedDev = targetMac
+        ? siteDevices.find((d) => d.mac.toLowerCase() === targetMac.toLowerCase())
+        : undefined;
+      const deviceName =
+        details.device_name ||
+        (matchedDev
+          ? formatDeviceFriendlyName(matchedDev.hostname, targetMac)
+          : targetMac
+            ? formatDeviceFriendlyName(null, targetMac)
+            : 'device');
+
+      const verbLower = getCommandVerbLower(commandType);
+      const nounLower = getCommandNounLower(commandType);
+
+      let plainText = '';
+      let subText: string | null = null;
+
+      if (row.action === 'fix_approved') {
+        plainText = `Fix approved: ${verbLower} ${deviceName}`;
+      } else if (row.action === 'fix_self_handled') {
+        plainText = `I'll do it myself: ${verbLower} ${deviceName}`;
+      } else if (row.action === 'command_result_reported') {
+        if (details.status === 'failed') {
+          plainText = `Agent: simulated ${nounLower} didn't work`;
+        } else {
+          plainText = `Agent: simulated ${nounLower} completed`;
+        }
+        if (typeof details.message === 'string' && details.message.trim()) {
+          subText = details.message.trim();
+        }
+      } else {
+        plainText = row.action.replace(/_/g, ' ');
+      }
+
+      return {
+        id: row.id,
+        siteId: row.siteId,
+        actorType: row.actorType,
+        action: row.action,
+        plainText,
+        subText,
+        deviceName,
+        commandType: commandType ?? null,
+        status: details.status ?? null,
+        createdAt: new Date(row.createdAt).toISOString(),
+      };
+    });
+
+    return res.json({
+      siteId,
+      items,
+    });
+  } catch (err: any) {
+    console.error('Failed to fetch activity log:', err);
+    return res.status(500).json({
+      error: {
+        code: 'server_error',
+        message: 'Failed to load activity log for this site.',
+      },
+    });
+  }
+});
+

@@ -1,7 +1,15 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { asc, desc, eq, and, gte, sql } from 'drizzle-orm';
 import { db } from '../db/index.ts';
-import { alerts, devices, metricSamples, recommendations, settings } from '../db/schema.ts';
+import {
+  alerts,
+  auditLog,
+  commands,
+  devices,
+  metricSamples,
+  recommendations,
+  settings,
+} from '../db/schema.ts';
 import { decodeAlertTitleAndReason } from './alertEngine.ts';
 
 export const SYSTEM_INSTRUCTION =
@@ -112,6 +120,16 @@ function formatSingleLineError(err: any): string {
   return status ? `HTTP ${status} (${firstLine})` : firstLine;
 }
 
+export interface RecommendationCommandStatus {
+  id: string;
+  type: 'restart_device' | 'isolate_device' | 'reconnect_device';
+  targetMac: string;
+  status: 'pending' | 'sent' | 'succeeded' | 'failed';
+  approvedAt: string;
+  finishedAt: string | null;
+  resultMessage: string | null;
+}
+
 export interface FormattedRecommendation {
   id: string;
   alertId: string;
@@ -120,6 +138,74 @@ export interface FormattedRecommendation {
   actionText: string;
   commandType: 'restart_device' | 'isolate_device' | 'reconnect_device' | null;
   targetMac: string | null;
+  targetDeviceName: string | null;
+  selfHandled: boolean;
+  command: RecommendationCommandStatus | null;
+  deviceHasPendingCommand: boolean;
+}
+
+export function formatDeviceFriendlyName(
+  rawHostname: string | null | undefined,
+  fallbackMac?: string | null
+): string {
+  const host = (rawHostname || '').trim();
+  if (!host || host.toLowerCase() === 'unknown') {
+    return fallbackMac ? `Device (${fallbackMac})` : 'Unknown device';
+  }
+  const lower = host.toLowerCase();
+  if (lower === 'reception-pc') return 'Reception PC';
+  if (lower === 'reception-pc-01') return 'Reception PC 01';
+  if (lower === 'reception-pc-02') return 'Reception PC 02';
+  if (lower === 'dr-chen-surgery-pc') return 'Dr Chen surgery PC';
+  if (lower === 'dr-patel-surgery-pc') return 'Dr Patel surgery PC';
+  if (lower === 'brother-label-printer') return 'Brother label printer';
+  if (lower === 'staff-breakroom-phone') return 'Staff breakroom phone';
+  if (lower === 'gateway-core-router') return 'Gateway core router';
+  if (lower === 'hp-laserjet-reception') return 'HP LaserJet reception';
+  if (lower === 'carestream-xray-imaging') return 'Carestream X-ray imaging';
+  if (lower === 'patient-checkin-ipad') return 'Patient check-in iPad';
+  if (lower === 'eftpos-terminal-counter1') return 'EFTPOS terminal counter 1';
+  if (lower === 'eftpos-terminal-counter2') return 'EFTPOS terminal counter 2';
+
+  if (host.includes('-')) {
+    const words = host.split('-').filter(Boolean);
+    return words
+      .map((w, i) => {
+        const lw = w.toLowerCase();
+        if (lw === 'pc') return 'PC';
+        if (lw === 'ipad') return 'iPad';
+        if (lw === 'hp') return 'HP';
+        if (lw === 'eftpos') return 'EFTPOS';
+        if (i === 0) return lw.charAt(0).toUpperCase() + lw.slice(1);
+        return lw;
+      })
+      .join(' ');
+  }
+  return host;
+}
+
+export function getCommandVerbCapitalized(
+  commandType: 'restart_device' | 'isolate_device' | 'reconnect_device' | string | null | undefined
+): string {
+  if (commandType === 'isolate_device') return 'Isolate';
+  if (commandType === 'reconnect_device') return 'Reconnect';
+  return 'Restart';
+}
+
+export function getCommandVerbLower(
+  commandType: 'restart_device' | 'isolate_device' | 'reconnect_device' | string | null | undefined
+): string {
+  if (commandType === 'isolate_device') return 'isolate';
+  if (commandType === 'reconnect_device') return 'reconnect';
+  return 'restart';
+}
+
+export function getCommandNounLower(
+  commandType: 'restart_device' | 'isolate_device' | 'reconnect_device' | string | null | undefined
+): string {
+  if (commandType === 'isolate_device') return 'isolation';
+  if (commandType === 'reconnect_device') return 'reconnect';
+  return 'restart';
 }
 
 export interface SiteSummary {
@@ -457,11 +543,257 @@ export async function invalidateAlertRecommendations(alertId: string): Promise<v
   await db.delete(recommendations).where(eq(recommendations.alertId, alertId));
 }
 
+export async function resolveRecommendationTargetDevice(params: {
+  siteId: string;
+  recommendationId: string;
+  actionText: string;
+  commandType: 'restart_device' | 'isolate_device' | 'reconnect_device' | null;
+  alertDeviceId: string | null;
+  siteDevices?: (typeof devices.$inferSelect)[];
+  existingCommandMac?: string | null;
+}): Promise<{ targetMac: string | null; targetDeviceName: string | null }> {
+  const {
+    siteId,
+    recommendationId,
+    actionText,
+    commandType,
+    alertDeviceId,
+    existingCommandMac,
+  } = params;
+
+  if (!commandType) {
+    return { targetMac: null, targetDeviceName: null };
+  }
+
+  const siteDevices =
+    params.siteDevices ??
+    (await db.select().from(devices).where(eq(devices.siteId, siteId)));
+
+  let targetMac: string | null = existingCommandMac || recommendationTargetMac.get(recommendationId) || null;
+
+  if (!targetMac && alertDeviceId) {
+    const alertDev = siteDevices.find((d) => d.id === alertDeviceId);
+    if (alertDev) {
+      targetMac = alertDev.mac;
+    }
+  }
+
+  if (!targetMac && actionText) {
+    const lowerText = actionText.toLowerCase();
+    for (const d of siteDevices) {
+      const rawHost = (d.hostname || '').toLowerCase();
+      const friendly = formatDeviceFriendlyName(d.hostname, d.mac).toLowerCase();
+      if (
+        (rawHost && rawHost !== 'unknown' && lowerText.includes(rawHost)) ||
+        (friendly && friendly !== 'unknown device' && lowerText.includes(friendly))
+      ) {
+        targetMac = d.mac;
+        break;
+      }
+    }
+  }
+
+  if (!targetMac && siteDevices.length > 0) {
+    const receptionPc = siteDevices.find((d) =>
+      (d.hostname || '').toLowerCase().startsWith('reception-pc')
+    );
+    const router = siteDevices.find((d) =>
+      (d.hostname || '').toLowerCase().includes('router')
+    );
+    targetMac = receptionPc?.mac ?? router?.mac ?? siteDevices[0].mac;
+  }
+
+  if (targetMac) {
+    recommendationTargetMac.set(recommendationId, targetMac);
+  }
+
+  const matchedDevice = targetMac
+    ? siteDevices.find((d) => d.mac.toLowerCase() === targetMac!.toLowerCase())
+    : undefined;
+
+  const targetDeviceName = targetMac
+    ? formatDeviceFriendlyName(matchedDevice?.hostname, targetMac)
+    : null;
+
+  return { targetMac, targetDeviceName };
+}
+
+async function ensureSeededRecommendationsForAlert(params: {
+  siteId: string;
+  alertId: string;
+  severity: 'critical' | 'warning' | 'info';
+  rule: string;
+  reason: string;
+  deviceId: string | null;
+  siteDevices: (typeof devices.$inferSelect)[];
+}): Promise<(typeof recommendations.$inferSelect)[]> {
+  const { alertId, severity, rule, reason, deviceId, siteDevices } = params;
+  if (severity !== 'critical' && severity !== 'warning') {
+    return [];
+  }
+
+  const explanationText = buildBasicAlertExplanation(rule, reason);
+  const alertDev = deviceId ? siteDevices.find((d) => d.id === deviceId) : undefined;
+  const receptionPc = siteDevices.find((d) =>
+    (d.hostname || '').toLowerCase().startsWith('reception-pc')
+  );
+  const targetDev = alertDev ?? receptionPc ?? siteDevices[0];
+  const friendlyName = formatDeviceFriendlyName(targetDev?.hostname, targetDev?.mac);
+
+  let primaryAction = `Restart ${friendlyName} to restore a stable network connection.`;
+  let primaryCommand: 'restart_device' | 'isolate_device' | 'reconnect_device' =
+    'restart_device';
+  let secondaryAction =
+    'Check that the power cord and network cable are plugged in firmly.';
+
+  if (rule === 'new_device') {
+    primaryAction = `Isolate ${friendlyName} until you verify who connected it to your network.`;
+    primaryCommand = 'isolate_device';
+    secondaryAction =
+      'Ask staff on duty if anyone recently connected a new phone, tablet, or laptop.';
+  } else if (rule === 'device_offline') {
+    primaryAction = `Restart ${friendlyName} so it reconnects to the site network.`;
+    primaryCommand = 'restart_device';
+    secondaryAction = `Check that ${friendlyName} is plugged into power and switched on.`;
+  } else if (rule === 'delay' || rule === 'packet_loss' || rule === 'internet_down') {
+    primaryAction = `Restart ${friendlyName} to clear stalled network sessions at this site.`;
+    primaryCommand = 'restart_device';
+    secondaryAction =
+      'Check your main router and modem lights to confirm the internet line is steady.';
+  }
+
+  const insertedRows: (typeof recommendations.$inferSelect)[] = [];
+
+  const [row1] = await db
+    .insert(recommendations)
+    .values({
+      alertId,
+      rank: 1,
+      explanation: explanationText,
+      actionText: primaryAction,
+      commandType: primaryCommand,
+    })
+    .returning();
+
+  if (row1) {
+    if (targetDev?.mac) {
+      recommendationTargetMac.set(row1.id, targetDev.mac);
+    }
+    insertedRows.push(row1);
+  }
+
+  const [row2] = await db
+    .insert(recommendations)
+    .values({
+      alertId,
+      rank: 2,
+      explanation: explanationText,
+      actionText: secondaryAction,
+      commandType: null,
+    })
+    .returning();
+
+  if (row2) {
+    insertedRows.push(row2);
+  }
+
+  return insertedRows;
+}
+
+async function formatAndEnrichRecommendations(params: {
+  siteId: string;
+  alertDeviceId: string | null;
+  rows: (typeof recommendations.$inferSelect)[];
+  siteDevices: (typeof devices.$inferSelect)[];
+}): Promise<FormattedRecommendation[]> {
+  const { siteId, alertDeviceId, rows, siteDevices } = params;
+  if (rows.length === 0) return [];
+
+  const [siteCommands, selfHandledLogs] = await Promise.all([
+    db
+      .select()
+      .from(commands)
+      .where(eq(commands.siteId, siteId))
+      .orderBy(desc(commands.approvedAt)),
+    db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.siteId, siteId), eq(auditLog.action, 'fix_self_handled')))
+      .orderBy(desc(auditLog.createdAt)),
+  ]);
+
+  const selfHandledSet = new Set<string>();
+  for (const log of selfHandledLogs) {
+    const details = (log.details || {}) as Record<string, any>;
+    if (typeof details.recommendation_id === 'string') {
+      selfHandledSet.add(details.recommendation_id);
+    }
+  }
+
+  const result: FormattedRecommendation[] = [];
+
+  for (const r of rows) {
+    const recCmd = siteCommands.find((c) => c.recommendationId === r.id);
+
+    const { targetMac, targetDeviceName } = await resolveRecommendationTargetDevice({
+      siteId,
+      recommendationId: r.id,
+      actionText: r.actionText,
+      commandType: r.commandType,
+      alertDeviceId,
+      siteDevices,
+      existingCommandMac: recCmd?.targetMac ?? null,
+    });
+
+    const pendingDeviceCmd =
+      r.commandType && targetMac
+        ? siteCommands.find(
+            (c) =>
+              c.status === 'pending' &&
+              c.type === r.commandType &&
+              c.targetMac.toLowerCase() === targetMac.toLowerCase()
+          )
+        : undefined;
+
+    const effectiveCmd = recCmd ?? null;
+
+    result.push({
+      id: r.id,
+      alertId: r.alertId,
+      rank: r.rank,
+      explanation: r.explanation,
+      actionText: r.actionText,
+      commandType: r.commandType,
+      targetMac,
+      targetDeviceName,
+      selfHandled: selfHandledSet.has(r.id),
+      command: effectiveCmd
+        ? {
+            id: effectiveCmd.id,
+            type: effectiveCmd.type,
+            targetMac: effectiveCmd.targetMac,
+            status: effectiveCmd.status,
+            approvedAt: new Date(effectiveCmd.approvedAt).toISOString(),
+            finishedAt: effectiveCmd.finishedAt
+              ? new Date(effectiveCmd.finishedAt).toISOString()
+              : null,
+            resultMessage: effectiveCmd.resultMessage ?? null,
+          }
+        : null,
+      deviceHasPendingCommand: Boolean(pendingDeviceCmd),
+    });
+  }
+
+  return result;
+}
+
 /**
- * Reads already-saved AI explanation and recommendations for an alert from the `recommendations` table
- * without calling Gemini. Used by GET /api/sites/:siteId/alerts so polling never triggers background AI calls.
+ * Reads saved AI explanation and recommendations for an alert from the `recommendations` table
+ * without calling Gemini. If an open critical/warning alert has no rows in `recommendations` yet,
+ * seeds deterministic recommendations in the database so the approve-fix flow works without Gemini calls.
  */
 export async function getSavedAlertRecommendations(params: {
+  siteId?: string;
   alertId: string;
   severity: 'critical' | 'warning' | 'info';
   rule: string;
@@ -476,43 +808,57 @@ export async function getSavedAlertRecommendations(params: {
   const { alertId, severity, rule, reason, deviceId } = params;
   const basicExplanation = buildBasicAlertExplanation(rule, reason);
 
-  const existingRows = await db
+  let resolvedSiteId = params.siteId;
+  if (!resolvedSiteId) {
+    const [alertRow] = await db
+      .select({ siteId: alerts.siteId })
+      .from(alerts)
+      .where(eq(alerts.id, alertId))
+      .limit(1);
+    resolvedSiteId = alertRow?.siteId;
+  }
+
+  const siteDevices = resolvedSiteId
+    ? await db.select().from(devices).where(eq(devices.siteId, resolvedSiteId))
+    : [];
+
+  let existingRows = await db
     .select()
     .from(recommendations)
     .where(eq(recommendations.alertId, alertId))
     .orderBy(asc(recommendations.rank));
 
-  if (existingRows.length === 0) {
-    const backoff = alertBackoffByAlertId.get(alertId);
-    const inBackoff = Boolean(backoff && backoff.severity === severity && Date.now() < backoff.nextRetryAt);
+  if (
+    existingRows.length === 0 &&
+    resolvedSiteId &&
+    (severity === 'critical' || severity === 'warning')
+  ) {
+    existingRows = await ensureSeededRecommendationsForAlert({
+      siteId: resolvedSiteId,
+      alertId,
+      severity,
+      rule,
+      reason,
+      deviceId,
+      siteDevices,
+    });
+  }
+
+  if (existingRows.length === 0 || !resolvedSiteId) {
     return {
       explanation: null,
       recommendations: [],
-      aiAvailable: !inBackoff,
+      aiAvailable: true,
       basicExplanation,
     };
   }
 
-  let defaultDeviceMac: string | null = null;
-  if (deviceId) {
-    const [dev] = await db
-      .select({ mac: devices.mac })
-      .from(devices)
-      .where(eq(devices.id, deviceId))
-      .limit(1);
-    defaultDeviceMac = dev?.mac ?? null;
-  }
-
-  const formatted: FormattedRecommendation[] = existingRows.map((r) => ({
-    id: r.id,
-    alertId: r.alertId,
-    rank: r.rank,
-    explanation: r.explanation,
-    actionText: r.actionText,
-    commandType: r.commandType,
-    targetMac:
-      recommendationTargetMac.get(r.id) ?? (r.commandType ? defaultDeviceMac : null),
-  }));
+  const formatted = await formatAndEnrichRecommendations({
+    siteId: resolvedSiteId,
+    alertDeviceId: deviceId,
+    rows: existingRows,
+    siteDevices,
+  });
 
   return {
     explanation: formatted[0]?.explanation ?? null,
@@ -523,10 +869,8 @@ export async function getSavedAlertRecommendations(params: {
 }
 
 /**
- * Ensures AI explanation and up to 3 recommendations exist in the `recommendations` table
- * for an open critical or warning alert.
- * Generates once per alert when requested on-demand, and regenerates only if the alert's severity changes.
- * Enforces per-alert backoff (30s, 1m, 2m, 5m, then every 10m) and logs a single line per failed attempt.
+ * Returns saved recommendations (or seeds deterministic recommendations if missing)
+ * without making Gemini API calls during the approve-fix flow.
  */
 export async function getOrGenerateAlertRecommendations(params: {
   siteId: string;
@@ -544,284 +888,20 @@ export async function getOrGenerateAlertRecommendations(params: {
   basicExplanation: string;
   nextRetryAt: number | null;
 }> {
-  const { siteId, alertId, severity, rule, title, reason, deviceId } = params;
-  const basicExplanation = buildBasicAlertExplanation(rule, reason);
-
-  // Resolve device MAC if alert is tied to a device
-  let defaultDeviceMac: string | null = null;
-  if (deviceId) {
-    const [dev] = await db
-      .select({ mac: devices.mac })
-      .from(devices)
-      .where(eq(devices.id, deviceId))
-      .limit(1);
-    defaultDeviceMac = dev?.mac ?? null;
-  }
-
-  // Check existing recommendations in DB
-  const existingRows = await db
-    .select()
-    .from(recommendations)
-    .where(eq(recommendations.alertId, alertId))
-    .orderBy(asc(recommendations.rank));
-
-  const previousSeverity = alertGeneratedSeverity.get(alertId);
-
-  // If recommendations already exist in DB and severity hasn't changed, return them directly without calling Gemini
-  if (existingRows.length > 0 && (!previousSeverity || previousSeverity === severity)) {
-    if (!previousSeverity) {
-      alertGeneratedSeverity.set(alertId, severity);
-    }
-    alertBackoffByAlertId.delete(alertId);
-    const formatted: FormattedRecommendation[] = existingRows.map((r) => ({
-      id: r.id,
-      alertId: r.alertId,
-      rank: r.rank,
-      explanation: r.explanation,
-      actionText: r.actionText,
-      commandType: r.commandType,
-      targetMac:
-        recommendationTargetMac.get(r.id) ?? (r.commandType ? defaultDeviceMac : null),
-    }));
-    return {
-      explanation: formatted[0]?.explanation ?? null,
-      recommendations: formatted,
-      aiAvailable: true,
-      basicExplanation,
-      nextRetryAt: null,
-    };
-  }
-
-  // Only generate for critical or warning alerts
-  if (severity !== 'critical' && severity !== 'warning') {
-    return {
-      explanation: null,
-      recommendations: [],
-      aiAvailable: true,
-      basicExplanation,
-      nextRetryAt: null,
-    };
-  }
-
-  // Check per-alert backoff schedule: never retry the same alert more often than 30s, 1m, 2m, 5m, 10m
-  const backoff = alertBackoffByAlertId.get(alertId);
-  if (backoff && backoff.severity === severity && Date.now() < backoff.nextRetryAt) {
-    return {
-      explanation: null,
-      recommendations: [],
-      aiAvailable: false,
-      basicExplanation,
-      nextRetryAt: backoff.nextRetryAt,
-    };
-  }
-
-  const inFlightKey = `${alertId}:${severity}`;
-  if (inFlightGenerations.has(inFlightKey)) {
-    const res = await inFlightGenerations.get(inFlightKey)!;
-    const latestBackoff = alertBackoffByAlertId.get(alertId);
-    if (!res) {
-      return {
-        explanation: null,
-        recommendations: [],
-        aiAvailable: false,
-        basicExplanation,
-        nextRetryAt: latestBackoff?.nextRetryAt ?? null,
-      };
-    }
-    return {
-      explanation: res[0]?.explanation ?? null,
-      recommendations: res,
-      aiAvailable: true,
-      basicExplanation,
-      nextRetryAt: null,
-    };
-  }
-
-  const generationPromise = (async (): Promise<FormattedRecommendation[] | null> => {
-    try {
-      const siteSummary = params.summary ?? (await buildSiteSummary(siteId));
-
-      const prompt = JSON.stringify(
-        {
-          task: 'Explain this network alert in two plain sentences for a non-technical small business owner, and provide up to three practical recommendations ordered most important first. For each recommendation, include action_text, command_type (restart_device, isolate_device, reconnect_device, or null), and target_mac (the MAC address of the specific device when a device action would help, otherwise null).',
-          alert: {
-            severity,
-            rule,
-            title,
-            reason,
-            deviceMac: defaultDeviceMac,
-          },
-          siteSummary,
-        },
-        null,
-        2
-      );
-
-      const response = await generateContentWithFlashFallback({
-        contents: prompt,
-        config: {
-          systemInstruction: SYSTEM_INSTRUCTION,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              explanation: {
-                type: Type.STRING,
-                description:
-                  'Plain-English explanation of why this alert is happening, in two sentences.',
-              },
-              recommendations: {
-                type: Type.ARRAY,
-                description: 'Up to three recommendations, ordered most important first.',
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    action_text: {
-                      type: Type.STRING,
-                      description: 'Plain-English step the user can take.',
-                    },
-                    command_type: {
-                      type: Type.STRING,
-                      nullable: true,
-                      description:
-                        'One of restart_device, isolate_device, reconnect_device, or null if no automated device action applies.',
-                    },
-                    target_mac: {
-                      type: Type.STRING,
-                      nullable: true,
-                      description:
-                        'MAC address of the target device when a device action would help, or null.',
-                    },
-                  },
-                  required: ['action_text'],
-                },
-              },
-            },
-            required: ['explanation', 'recommendations'],
-          },
-        },
-      });
-
-      const rawText = response.text?.trim();
-      if (!rawText) {
-        throw new Error('Empty response from Gemini');
-      }
-
-      const parsed = JSON.parse(rawText) as {
-        explanation?: string;
-        recommendations?: {
-          action_text?: string;
-          command_type?: string | null;
-          target_mac?: string | null;
-        }[];
-      };
-
-      const explanationText = (parsed.explanation || '').trim();
-      const rawRecs = Array.isArray(parsed.recommendations)
-        ? parsed.recommendations.slice(0, 3)
-        : [];
-
-      if (!explanationText || rawRecs.length === 0) {
-        throw new Error('Incomplete JSON structure from Gemini');
-      }
-
-      // If severity changed and old rows existed, replace them
-      if (existingRows.length > 0) {
-        await db.delete(recommendations).where(eq(recommendations.alertId, alertId));
-      }
-
-      const validCommands = new Set(['restart_device', 'isolate_device', 'reconnect_device']);
-      const insertedFormatted: FormattedRecommendation[] = [];
-
-      for (let i = 0; i < rawRecs.length; i++) {
-        const item = rawRecs[i];
-        const actionText = (item.action_text || '').trim();
-        if (!actionText) continue;
-
-        const rawCmd = item.command_type ? String(item.command_type).trim() : null;
-        const commandType =
-          rawCmd && validCommands.has(rawCmd)
-            ? (rawCmd as 'restart_device' | 'isolate_device' | 'reconnect_device')
-            : null;
-
-        const targetMac = commandType
-          ? item.target_mac
-            ? String(item.target_mac).trim()
-            : defaultDeviceMac
-          : null;
-
-        const [inserted] = await db
-          .insert(recommendations)
-          .values({
-            alertId,
-            rank: insertedFormatted.length + 1,
-            explanation: explanationText,
-            actionText,
-            commandType,
-          })
-          .returning();
-
-        if (inserted) {
-          recommendationTargetMac.set(inserted.id, targetMac);
-          insertedFormatted.push({
-            id: inserted.id,
-            alertId: inserted.alertId,
-            rank: inserted.rank,
-            explanation: inserted.explanation,
-            actionText: inserted.actionText,
-            commandType: inserted.commandType,
-            targetMac,
-          });
-        }
-      }
-
-      alertGeneratedSeverity.set(alertId, severity);
-      alertBackoffByAlertId.delete(alertId);
-      return insertedFormatted;
-    } catch (err) {
-      const prevFailures =
-        backoff && backoff.severity === severity ? backoff.failureCount : 0;
-      const failureCount = prevFailures + 1;
-      const backoffMs =
-        ALERT_BACKOFF_SCHEDULE_MS[
-          Math.min(failureCount - 1, ALERT_BACKOFF_SCHEDULE_MS.length - 1)
-        ];
-
-      alertBackoffByAlertId.set(alertId, {
-        failureCount,
-        nextRetryAt: Date.now() + backoffMs,
-        severity,
-      });
-
-      // Log strictly one line per failed attempt
-      console.warn(
-        `[AI] Alert ${alertId} (${rule}) explanation attempt #${failureCount} failed: ${formatSingleLineError(err)} — next retry in ${backoffMs / 1000}s`
-      );
-      return null;
-    } finally {
-      inFlightGenerations.delete(inFlightKey);
-    }
-  })();
-
-  inFlightGenerations.set(inFlightKey, generationPromise);
-  const generated = await generationPromise;
-
-  if (!generated) {
-    const latestBackoff = alertBackoffByAlertId.get(alertId);
-    return {
-      explanation: null,
-      recommendations: [],
-      aiAvailable: false,
-      basicExplanation,
-      nextRetryAt: latestBackoff?.nextRetryAt ?? null,
-    };
-  }
+  const saved = await getSavedAlertRecommendations({
+    siteId: params.siteId,
+    alertId: params.alertId,
+    severity: params.severity,
+    rule: params.rule,
+    reason: params.reason,
+    deviceId: params.deviceId,
+  });
 
   return {
-    explanation: generated[0]?.explanation ?? null,
-    recommendations: generated,
-    aiAvailable: true,
-    basicExplanation,
+    explanation: saved.explanation,
+    recommendations: saved.recommendations,
+    aiAvailable: saved.aiAvailable,
+    basicExplanation: saved.basicExplanation,
     nextRetryAt: null,
   };
 }

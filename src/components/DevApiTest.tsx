@@ -57,11 +57,13 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
   const [test2Result2, setTest2Result2] = useState<TestResult | null>(null);
   const [test3Result, setTest3Result] = useState<TestResult | null>(null);
   const [faultResult, setFaultResult] = useState<TestResult | null>(null);
+  const [agentSimResult, setAgentSimResult] = useState<TestResult | null>(null);
 
   const [isLoading1, setIsLoading1] = useState(false);
   const [isLoading2, setIsLoading2] = useState(false);
   const [isLoading3, setIsLoading3] = useState(false);
   const [isLoadingFault, setIsLoadingFault] = useState(false);
+  const [isLoadingAgentSim, setIsLoadingAgentSim] = useState(false);
 
   const loadAvailableCodes = async () => {
     try {
@@ -368,6 +370,45 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
     }
   };
 
+  // -------------------------------------------------------------------------
+  // Simulate agent result: mark newest pending command sent, wait 3s, mark succeeded
+  // -------------------------------------------------------------------------
+  const runSimulateAgentResult = async () => {
+    setIsLoadingAgentSim(true);
+    setAgentSimResult(null);
+    const start = performance.now();
+
+    try {
+      const res = await fetch('/api/dev/simulate-agent-result', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_id: faultSiteId }),
+      });
+
+      const data = await res.json();
+      const timeMs = Math.round(performance.now() - start);
+
+      setAgentSimResult({
+        title: 'Simulate agent result',
+        endpoint: '/api/dev/simulate-agent-result',
+        method: 'POST',
+        statusCode: res.status,
+        statusText: res.statusText,
+        responseJson: data,
+        timeMs,
+      });
+    } catch (err: any) {
+      setAgentSimResult({
+        title: 'Simulate agent result',
+        endpoint: '/api/dev/simulate-agent-result',
+        method: 'POST',
+        error: err.message,
+      });
+    } finally {
+      setIsLoadingAgentSim(false);
+    }
+  };
+
   const getStatusBadge = (code?: number) => {
     if (!code) return null;
     let color = 'bg-slate-800 text-slate-300 border-slate-700';
@@ -431,6 +472,50 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
             <span className="text-slate-500">Site ID:</span>
             <span className="text-slate-300">{siteId || 'Not set'}</span>
           </div>
+        </div>
+
+        {/* ================================================================= */}
+        {/* SIMULATE AGENT RESULT CARD */}
+        {/* ================================================================= */}
+        <div className="bg-slate-900/60 rounded-2xl border border-emerald-500/30 p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 text-xs font-mono font-bold flex items-center justify-center">
+                  <Play className="w-3.5 h-3.5" />
+                </span>
+                <h3 className="text-sm font-bold text-slate-100">
+                  Simulate agent result
+                </h3>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Finds the newest <code className="text-emerald-300 font-mono">pending</code> command: marks it <code className="text-emerald-300 font-mono">sent</code>, waits 3 seconds, then marks it <code className="text-emerald-300 font-mono">succeeded</code> with <code className="text-emerald-300 font-mono">&quot;Simulated restart of &lt;device&gt; completed.&quot;</code> and writes the audit row.
+              </p>
+            </div>
+
+            <button
+              onClick={runSimulateAgentResult}
+              disabled={isLoadingAgentSim}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all disabled:opacity-50 shrink-0 cursor-pointer"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              <span>{isLoadingAgentSim ? 'Simulating (3s)...' : 'Simulate agent result'}</span>
+            </button>
+          </div>
+
+          {agentSimResult && (
+            <div className="space-y-2 pt-2 border-t border-slate-800/60">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-mono text-slate-400">
+                  {agentSimResult.method} {agentSimResult.endpoint} ({agentSimResult.timeMs}ms)
+                </span>
+                {getStatusBadge(agentSimResult.statusCode)}
+              </div>
+              <pre className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
+                {JSON.stringify(agentSimResult.responseJson || { error: agentSimResult.error }, null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
 
         {/* ================================================================= */}
