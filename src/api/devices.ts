@@ -1,63 +1,69 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { db } from '../db/index.ts';
 import { devices, agents, metricSamples, setupCodes } from '../db/schema.ts';
 import { eq, asc, and, isNull, sql, desc } from 'drizzle-orm';
+import { AuthenticatedRequest, requireAuth } from './auth.ts';
 
 export const devicesRouter = Router();
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // GET /api/sites/:siteId/devices
-devicesRouter.get('/sites/:siteId/devices', async (req: Request, res: Response) => {
-  const { siteId } = req.params;
+devicesRouter.get(
+  '/sites/:siteId/devices',
+  requireAuth,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { siteId } = req.params;
+    const isAdmin = req.authUser?.role === 'admin';
 
-  if (!siteId || !UUID_REGEX.test(siteId)) {
-    return res.status(400).json({
-      error: {
-        code: 'invalid_site_id',
-        message: 'A valid site ID is required.',
-      },
-    });
-  }
+    if (!siteId || !UUID_REGEX.test(siteId)) {
+      return res.status(400).json({
+        error: {
+          code: 'invalid_site_id',
+          message: 'A valid site ID is required.',
+        },
+      });
+    }
 
-  try {
-    const [[agentRow], [anySampleRow], [validCodeRow], siteDevices] = await Promise.all([
-      db
-        .select({ id: agents.id })
-        .from(agents)
-        .where(eq(agents.siteId, siteId))
-        .limit(1),
-      db
-        .select({ id: metricSamples.id })
-        .from(metricSamples)
-        .where(eq(metricSamples.siteId, siteId))
-        .limit(1),
-      db
-        .select({
-          code: setupCodes.code,
-          expiresAt: setupCodes.expiresAt,
-        })
-        .from(setupCodes)
-        .where(
-          and(
-            eq(setupCodes.siteId, siteId),
-            isNull(setupCodes.usedAt),
-            sql`${setupCodes.expiresAt} > NOW()`
+    try {
+      const [[agentRow], [anySampleRow], [validCodeRow], siteDevices] = await Promise.all([
+        db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.siteId, siteId))
+          .limit(1),
+        db
+          .select({ id: metricSamples.id })
+          .from(metricSamples)
+          .where(eq(metricSamples.siteId, siteId))
+          .limit(1),
+        db
+          .select({
+            code: setupCodes.code,
+            expiresAt: setupCodes.expiresAt,
+          })
+          .from(setupCodes)
+          .where(
+            and(
+              eq(setupCodes.siteId, siteId),
+              isNull(setupCodes.usedAt),
+              sql`${setupCodes.expiresAt} > NOW()`
+            )
           )
-        )
-        .orderBy(desc(setupCodes.expiresAt))
-        .limit(1),
-      db
-        .select()
-        .from(devices)
-        .where(eq(devices.siteId, siteId))
-        .orderBy(asc(devices.online), asc(devices.hostname)),
-    ]);
+          .orderBy(desc(setupCodes.expiresAt))
+          .limit(1),
+        db
+          .select()
+          .from(devices)
+          .where(eq(devices.siteId, siteId))
+          .orderBy(asc(devices.online), asc(devices.hostname)),
+      ]);
 
-    const hasRegisteredAgent = Boolean(agentRow);
-    const hasReadings = Boolean(anySampleRow);
-    const setupCode = validCodeRow ? validCodeRow.code : null;
-    const setupCodeExpiresAt = validCodeRow ? new Date(validCodeRow.expiresAt).toISOString() : null;
+      const hasRegisteredAgent = Boolean(agentRow);
+      const hasReadings = Boolean(anySampleRow);
+      const setupCode = isAdmin && validCodeRow ? validCodeRow.code : null;
+      const setupCodeExpiresAt =
+        isAdmin && validCodeRow ? new Date(validCodeRow.expiresAt).toISOString() : null;
 
     const nowMs = Date.now();
     const twentyFourHoursMs = 24 * 60 * 60 * 1000;

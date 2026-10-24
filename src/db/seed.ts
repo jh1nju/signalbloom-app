@@ -49,8 +49,8 @@ async function runSeed() {
   }
 
   // 2. Create Users: One Admin and One Staff
-  const adminEmail = 'admin@demodental.co.nz';
-  const staffEmail = 'staff@demodental.co.nz';
+  const adminEmail = 'admin@signalbloom.test';
+  const staffEmail = 'staff@signalbloom.test';
 
   let [adminUser] = await db
     .select()

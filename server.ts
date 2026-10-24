@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { agentRouter } from './src/api/agent.ts';
+import { authRouter, requireAuth, requireAdmin } from './src/api/auth.ts';
 import { appShellRouter } from './src/api/appShell.ts';
 import { healthRouter } from './src/api/health.ts';
 import { devicesRouter } from './src/api/devices.ts';
@@ -16,16 +17,18 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 // Mount API routes
+// Note: agentRouter (/api/agent/* and /api/ingest) uses site tokens only — no Firebase checks
 app.use('/api', agentRouter);
+app.use('/api', authRouter);
 app.use('/api', appShellRouter);
 app.use('/api', healthRouter);
 app.use('/api', devicesRouter);
 app.use('/api', alertsRouter);
 app.use('/api', aiRouter);
 
-// Mount /api/dev/* ONLY when NODE_ENV is not production
+// Mount /api/dev/* ONLY when NODE_ENV is not production, and require admin role
 if (process.env.NODE_ENV !== 'production') {
-  app.use('/api/dev', devRouter);
+  app.use('/api/dev', requireAuth, requireAdmin, devRouter);
 }
 
 // Health check endpoint

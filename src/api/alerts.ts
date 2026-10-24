@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import { db } from '../db/index.ts';
 import {
   alerts,
@@ -7,7 +7,6 @@ import {
   devices,
   recommendations,
   sites,
-  users,
 } from '../db/schema.ts';
 import { and, desc, eq } from 'drizzle-orm';
 import { decodeAlertTitleAndReason } from '../services/alertEngine.ts';
@@ -22,6 +21,7 @@ import {
   getSavedAlertRecommendations,
   resolveRecommendationTargetDevice,
 } from '../services/geminiService.ts';
+import { AuthenticatedRequest, requireAuth, requireAdmin } from './auth.ts';
 
 export const alertsRouter = Router();
 
@@ -67,8 +67,11 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 
 // GET /api/sites/:siteId/alerts
 // Returns site alerts along with saved explanations/recommendations and their live fix status.
-alertsRouter.get('/sites/:siteId/alerts', async (req: Request, res: Response) => {
-  const { siteId } = req.params;
+alertsRouter.get(
+  '/sites/:siteId/alerts',
+  requireAuth,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { siteId } = req.params;
 
   if (!siteId || !UUID_REGEX.test(siteId)) {
     return res.status(400).json({
@@ -173,7 +176,8 @@ alertsRouter.get('/sites/:siteId/alerts', async (req: Request, res: Response) =>
 // POST /api/sites/:siteId/alerts/:alertId/explain
 alertsRouter.post(
   '/sites/:siteId/alerts/:alertId/explain',
-  async (req: Request, res: Response) => {
+  requireAuth,
+  async (req: AuthenticatedRequest, res: Response) => {
     const { siteId, alertId } = req.params;
 
     if (!siteId || !UUID_REGEX.test(siteId) || !alertId || !UUID_REGEX.test(alertId)) {
@@ -237,12 +241,14 @@ alertsRouter.post(
   }
 );
 
-// POST /api/sites/:siteId/recommendations/:recommendationId/approve
+// POST /api/sites/:siteId/recommendations/:recommendationId/approve (Admin only — returns 403 for staff)
 // Creates a pending command for the recommendation's command_type and target_mac,
 // prevents a second pending fix for the same device and type, and writes an audit_log row.
 alertsRouter.post(
   '/sites/:siteId/recommendations/:recommendationId/approve',
-  async (req: Request, res: Response) => {
+  requireAuth,
+  requireAdmin,
+  async (req: AuthenticatedRequest, res: Response) => {
     const { siteId, recommendationId } = req.params;
 
     if (
@@ -370,17 +376,7 @@ alertsRouter.post(
         });
       }
 
-      const orgUsers = await db
-        .select()
-        .from(users)
-        .where(eq(users.organisationId, site.organisationId));
-      const actingUser = orgUsers.find((u) => u.role === 'admin') || orgUsers[0];
-      if (!actingUser) {
-        return res.status(500).json({
-          error: { code: 'no_user', message: 'No organisation user found to approve command.' },
-        });
-      }
-
+      const actingUser = req.authUser!;
       const approvedAt = new Date();
 
       const [createdCmd] = await db
@@ -437,12 +433,14 @@ alertsRouter.post(
   }
 );
 
-// POST /api/sites/:siteId/recommendations/:recommendationId/self-handle
+// POST /api/sites/:siteId/recommendations/:recommendationId/self-handle (Admin only — returns 403 for staff)
 // Marks the recommendation as handled by the user ("I'll do it myself"), with no command created,
 // and writes an audit_log row.
 alertsRouter.post(
   '/sites/:siteId/recommendations/:recommendationId/self-handle',
-  async (req: Request, res: Response) => {
+  requireAuth,
+  requireAdmin,
+  async (req: AuthenticatedRequest, res: Response) => {
     const { siteId, recommendationId } = req.params;
 
     if (
@@ -497,11 +495,7 @@ alertsRouter.post(
         });
       }
 
-      const orgUsers = await db
-        .select()
-        .from(users)
-        .where(eq(users.organisationId, site.organisationId));
-      const actingUser = orgUsers.find((u) => u.role === 'admin') || orgUsers[0];
+      const actingUser = req.authUser!;
 
       const siteDevices = await db.select().from(devices).where(eq(devices.siteId, siteId));
       const resolved = await resolveRecommendationTargetDevice({
@@ -535,7 +529,7 @@ alertsRouter.post(
           organisationId: site.organisationId,
           siteId,
           actorType: 'user',
-          actorId: actingUser?.id ?? null,
+          actorId: actingUser.id,
           action: 'fix_self_handled',
           details: {
             recommendation_id: rec.id,
@@ -565,10 +559,14 @@ alertsRouter.post(
   }
 );
 
-// GET /api/sites/:siteId/activity-log
+// GET /api/sites/:siteId/activity-log (Admin only — returns 403 for staff)
 // Lists audit_log rows for the selected site, newest first, formatted in plain words.
-alertsRouter.get('/sites/:siteId/activity-log', async (req: Request, res: Response) => {
-  const { siteId } = req.params;
+alertsRouter.get(
+  '/sites/:siteId/activity-log',
+  requireAuth,
+  requireAdmin,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { siteId } = req.params;
 
   if (!siteId || !UUID_REGEX.test(siteId)) {
     return res.status(400).json({

@@ -6,7 +6,10 @@ import {
   Cpu,
   FileText,
   CheckCircle2,
+  CreditCard,
+  Building2,
 } from 'lucide-react';
+import { authFetch } from '../firebase';
 
 export interface ActivityLogItem {
   id: string;
@@ -24,6 +27,20 @@ export interface ActivityLogItem {
 interface ActivityLogResponse {
   siteId: string;
   items: ActivityLogItem[];
+}
+
+interface BillingSiteItem {
+  id: string;
+  name: string;
+  address: string;
+  planName: string;
+  monthlyPriceNzd: string;
+}
+
+interface BillingResponse {
+  currency: string;
+  totalMonthlyNzd: string;
+  sites: BillingSiteItem[];
 }
 
 interface AccountSettingsTabProps {
@@ -50,27 +67,41 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
   organisationName,
 }) => {
   const [items, setItems] = useState<ActivityLogItem[]>([]);
+  const [billing, setBilling] = useState<BillingResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
-  const fetchActivityLog = useCallback(
+  const fetchAccountData = useCallback(
     async (silent = false) => {
       if (!siteId) return;
       if (!silent) setLoading(true);
       else setIsRefreshing(true);
 
       try {
-        const res = await fetch(
-          `/api/sites/${encodeURIComponent(siteId)}/activity-log`
-        ).catch(() => null);
+        const [logRes, billingRes] = await Promise.all([
+          authFetch(`/api/sites/${encodeURIComponent(siteId)}/activity-log`).catch(() => null),
+          authFetch('/api/billing').catch(() => null),
+        ]);
+
         if (
-          res &&
-          res.ok &&
-          (res.headers.get('content-type') || '').includes('application/json')
+          logRes &&
+          logRes.ok &&
+          (logRes.headers.get('content-type') || '').includes('application/json')
         ) {
-          const json: ActivityLogResponse | null = await res.json().catch(() => null);
+          const json: ActivityLogResponse | null = await logRes.json().catch(() => null);
           if (json && Array.isArray(json.items)) {
             setItems(json.items);
+          }
+        }
+
+        if (
+          billingRes &&
+          billingRes.ok &&
+          (billingRes.headers.get('content-type') || '').includes('application/json')
+        ) {
+          const billingJson: BillingResponse | null = await billingRes.json().catch(() => null);
+          if (billingJson) {
+            setBilling(billingJson);
           }
         }
       } catch {
@@ -85,15 +116,15 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
 
   useEffect(() => {
     setItems([]);
-    fetchActivityLog(false);
-  }, [fetchActivityLog]);
+    fetchAccountData(false);
+  }, [fetchAccountData]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchActivityLog(true);
+      fetchAccountData(true);
     }, 5000);
     return () => clearInterval(interval);
-  }, [fetchActivityLog]);
+  }, [fetchAccountData]);
 
   return (
     <div className="glass-panel p-6 sm:p-8 flex-1 overflow-y-auto space-y-8">
@@ -124,12 +155,12 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
             Account &amp; settings
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-            Activity log and site actions recorded for {siteName}.
+            Activity log, site plans, and billing for {organisationName}.
           </p>
         </div>
 
         <button
-          onClick={() => fetchActivityLog(true)}
+          onClick={() => fetchAccountData(true)}
           disabled={isRefreshing}
           className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-600 bg-white/60 hover:bg-white border border-slate-200 shadow-2xs hover:shadow-xs transition-all disabled:opacity-50 cursor-pointer"
           title="Refresh activity log"
@@ -243,6 +274,53 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
           </div>
         )}
       </div>
+
+      {/* Billing & sites section (Admin only) */}
+      {billing && (
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4 text-slate-700" />
+                <h2 className="text-lg font-bold text-slate-900 tracking-tight">
+                  Sites &amp; billing
+                </h2>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Monthly plans across all connected locations in {organisationName}.
+              </p>
+            </div>
+            <span className="text-xs font-bold px-3 py-1 rounded-full bg-sky-50 text-sky-800 border border-sky-200">
+              Total: ${billing.totalMonthlyNzd} {billing.currency} / month
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {billing.sites.map((site) => (
+              <div
+                key={site.id}
+                className="bg-white/75 rounded-2xl border border-black/[0.06] p-4 flex items-center justify-between gap-3 shadow-2xs"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 mt-0.5">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-bold text-slate-900">{site.name}</div>
+                    <div className="text-xs text-slate-500">{site.address}</div>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-xs font-semibold text-slate-600">{site.planName} plan</div>
+                  <div className="text-sm font-bold text-slate-900">
+                    ${site.monthlyPriceNzd} NZD/mo
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

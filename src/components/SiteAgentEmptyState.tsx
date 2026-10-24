@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PlugZap, KeyRound, Radio } from 'lucide-react';
+import { authFetch } from '../firebase';
 
 interface SiteAgentEmptyStateProps {
   siteId: string;
@@ -8,6 +9,7 @@ interface SiteAgentEmptyStateProps {
   setupCode: string | null;
   setupCodeExpiresAt?: string | null;
   onCodeCreated?: (newCode: string, expiresAt: string) => void;
+  userRole?: 'admin' | 'staff';
 }
 
 export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
@@ -17,7 +19,9 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
   setupCode,
   setupCodeExpiresAt,
   onCodeCreated,
+  userRole = 'admin',
 }) => {
+  const isAdmin = userRole === 'admin';
   const [localCode, setLocalCode] = useState<string | null>(setupCode);
   const [localExpiresAt, setLocalExpiresAt] = useState<string | null>(setupCodeExpiresAt ?? null);
   const [creatingCode, setCreatingCode] = useState<boolean>(false);
@@ -34,12 +38,12 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
   );
 
   const handleCreateSetupCode = async () => {
-    if (!siteId || creatingCode) return;
+    if (!siteId || creatingCode || !isAdmin) return;
     setCreatingCode(true);
     setErrorMessage(null);
 
     try {
-      const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/setup-code`, {
+      const res = await authFetch(`/api/sites/${encodeURIComponent(siteId)}/setup-code`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -107,56 +111,64 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
         </div>
 
         <div className="bg-white/90 rounded-2xl border border-black/[0.06] p-4 sm:p-5 space-y-3">
-          <div className="text-sm sm:text-base text-slate-800 font-medium leading-relaxed flex flex-wrap items-center gap-2">
-            <span>
-              2) Enter this setup code:{' '}
-              {isCodeValid && localCode ? (
-                <>
-                  <code
-                    className="font-mono font-bold px-2.5 py-1 rounded-lg text-sm sm:text-base border"
-                    style={{
-                      background: 'rgba(0, 128, 208, 0.08)',
-                      color: 'var(--accent-ocean)',
-                      borderColor: 'rgba(0, 128, 208, 0.2)',
-                    }}
-                  >
-                    {localCode}
-                  </code>
-                  .
-                </>
-              ) : (
-                <span className="text-slate-500 font-normal">No valid setup code.</span>
+          {isAdmin ? (
+            <>
+              <div className="text-sm sm:text-base text-slate-800 font-medium leading-relaxed flex flex-wrap items-center gap-2">
+                <span>
+                  2) Enter this setup code:{' '}
+                  {isCodeValid && localCode ? (
+                    <>
+                      <code
+                        className="font-mono font-bold px-2.5 py-1 rounded-lg text-sm sm:text-base border"
+                        style={{
+                          background: 'rgba(0, 128, 208, 0.08)',
+                          color: 'var(--accent-ocean)',
+                          borderColor: 'rgba(0, 128, 208, 0.2)',
+                        }}
+                      >
+                        {localCode}
+                      </code>
+                      .
+                    </>
+                  ) : (
+                    <span className="text-slate-500 font-normal">No valid setup code.</span>
+                  )}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={handleCreateSetupCode}
+                  disabled={creatingCode}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer disabled:opacity-50 shadow-2xs"
+                  style={
+                    !isCodeValid
+                      ? {
+                          background: 'var(--accent-blue)',
+                          color: 'white',
+                        }
+                      : {
+                          background: 'rgba(0, 128, 208, 0.08)',
+                          color: 'var(--accent-ocean)',
+                          border: '1px solid rgba(0, 128, 208, 0.2)',
+                        }
+                  }
+                >
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>{creatingCode ? 'Creating setup code...' : 'Create new setup code'}</span>
+                </button>
+                <span className="text-xs text-slate-500">Valid for 24 hours</span>
+              </div>
+
+              {errorMessage && (
+                <p className="text-xs text-rose-600 font-medium">{errorMessage}</p>
               )}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 pt-1">
-            <button
-              type="button"
-              onClick={handleCreateSetupCode}
-              disabled={creatingCode}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer disabled:opacity-50 shadow-2xs"
-              style={
-                !isCodeValid
-                  ? {
-                      background: 'var(--accent-blue)',
-                      color: 'white',
-                    }
-                  : {
-                      background: 'rgba(0, 128, 208, 0.08)',
-                      color: 'var(--accent-ocean)',
-                      border: '1px solid rgba(0, 128, 208, 0.2)',
-                    }
-              }
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>{creatingCode ? 'Creating setup code...' : 'Create new setup code'}</span>
-            </button>
-            <span className="text-xs text-slate-500">Valid for 24 hours</span>
-          </div>
-
-          {errorMessage && (
-            <p className="text-xs text-rose-600 font-medium">{errorMessage}</p>
+            </>
+          ) : (
+            <div className="text-sm sm:text-base text-slate-800 font-medium leading-relaxed">
+              2) Ask an admin to enter this site&apos;s setup code.
+            </div>
           )}
         </div>
 

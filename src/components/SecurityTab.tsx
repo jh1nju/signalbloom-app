@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { AlertAiSection, AlertItem, formatAlertDuration } from './NetworkHealthTab';
+import { authFetch } from '../firebase';
 
 interface AlertsResponse {
   siteId: string;
@@ -21,6 +22,7 @@ interface AlertsResponse {
 interface SecurityTabProps {
   siteId: string;
   siteName: string;
+  userRole?: 'admin' | 'staff';
 }
 
 function formatRelativeAgo(isoDate: string): string {
@@ -40,7 +42,11 @@ function formatRelativeAgo(isoDate: string): string {
   return `${days} ${days === 1 ? 'day' : 'days'} ago`;
 }
 
-export const SecurityTab: React.FC<SecurityTabProps> = ({ siteId, siteName }) => {
+export const SecurityTab: React.FC<SecurityTabProps> = ({
+  siteId,
+  siteName,
+  userRole = 'admin',
+}) => {
   const [activeAlerts, setActiveAlerts] = useState<AlertItem[]>([]);
   const [resolvedAlerts, setResolvedAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -52,7 +58,7 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({ siteId, siteName }) =>
     else setIsRefreshing(true);
 
     try {
-      const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/alerts`).catch(() => null);
+      const res = await authFetch(`/api/sites/${encodeURIComponent(siteId)}/alerts`).catch(() => null);
       if (res && res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const json: AlertsResponse | null = await res.json().catch(() => null);
         if (json) {
@@ -221,7 +227,7 @@ export const SecurityTab: React.FC<SecurityTabProps> = ({ siteId, siteName }) =>
                     </div>
                   </div>
 
-                  <AlertAiSection alert={alert} />
+                  <AlertAiSection alert={alert} userRole={userRole} />
                 </div>
               );
             })}

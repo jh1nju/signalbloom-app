@@ -1,8 +1,9 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import crypto from 'crypto';
 import { db } from '../db/index.ts';
 import { organisations, sites, settings, setupCodes } from '../db/schema.ts';
 import { eq, and, isNull, sql } from 'drizzle-orm';
+import { AuthenticatedRequest, requireAuth, requireAdmin } from './auth.ts';
 
 export const appShellRouter = Router();
 
@@ -16,9 +17,12 @@ function generateSetupCode(prefix = 'NEW'): string {
 }
 
 // GET /api/app-shell
-// Returns organisation info, list of sites, and sample_data status
-appShellRouter.get('/app-shell', async (_req: Request, res: Response) => {
+// Returns organisation info, list of sites, sample_data status, and authenticated user profile
+appShellRouter.get('/app-shell', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const authUser = req.authUser!;
+    const isAdmin = authUser.role === 'admin';
+
     // 1. Fetch organisation (fallback to default if none)
     const [org] = await db.select().from(organisations).limit(1);
 
@@ -87,7 +91,7 @@ appShellRouter.get('/app-shell', async (_req: Request, res: Response) => {
       }
     }
 
-    // 2. Fetch all sites
+    // 2. Fetch all sites (omit billing fields for staff)
     const allSites = await db
       .select({
         id: sites.id,
@@ -99,6 +103,16 @@ appShellRouter.get('/app-shell', async (_req: Request, res: Response) => {
       .from(sites)
       .orderBy(sites.name);
 
+    const sanitizedSites = allSites.map((s) =>
+      isAdmin
+        ? s
+        : {
+            id: s.id,
+            name: s.name,
+            address: s.address,
+          }
+    );
+
     // 3. Fetch sample_data setting
     const [sampleSetting] = await db
       .select({ value: settings.value })
@@ -108,9 +122,18 @@ appShellRouter.get('/app-shell', async (_req: Request, res: Response) => {
     const isSampleData = sampleSetting ? Boolean(sampleSetting.value) : false;
 
     return res.json({
-      organisation: org ? { id: org.id, name: org.name } : { id: 'default', name: 'SignalBloom Network' },
-      sites: allSites,
+      organisation: org
+        ? { id: org.id, name: org.name }
+        : { id: 'default', name: 'SignalBloom Network' },
+      sites: sanitizedSites,
       sampleData: isSampleData,
+      user: {
+        id: authUser.id,
+        name: authUser.name,
+        email: authUser.email,
+        role: authUser.role,
+        firebaseUid: authUser.firebaseUid,
+      },
     });
   } catch (err: any) {
     console.error('Failed to load app shell data:', err);
@@ -122,3 +145,108 @@ appShellRouter.get('/app-shell', async (_req: Request, res: Response) => {
     });
   }
 });
+
+// GET /api/billing (Admin only — returns 403 for staff)
+appShellRouter.get(
+  '/billing',
+  requireAuth,
+  requireAdmin,
+  async (_req: AuthenticatedRequest, res: Response) => {
+    try {
+      const allSites = await db
+        .select({
+          id: sites.id,
+          name: sites.name,
+          address: sites.address,
+          planName: sites.planName,
+          monthlyPriceNzd: sites.monthlyPriceNzd,
+        })
+        .from(sites)
+        .orderBy(sites.name);
+
+      const totalMonthlyNzd = allSites.reduce(
+        (sum, s) => sum + (parseFloat(String(s.monthlyPriceNzd)) || 0),
+        0
+      );
+
+      return res.json({
+        currency: 'NZD',
+        totalMonthlyNzd: totalMonthlyNzd.toFixed(2),
+        sites: allSites,
+      });
+    } catch (err: any) {
+      console.error('Failed to load billing:', err);
+      return res.status(500).json({
+        error: {
+          code: 'server_error',
+          message: 'Could not load billing details.',
+        },
+      });
+    }
+  }
+);
+
+// POST /api/sites (Admin only — returns 403 for staff)
+appShellRouter.post(
+  '/sites',
+  requireAuth,
+  requireAdmin,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { name, address, planName, monthlyPriceNzd } = req.body || {};
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({
+        error: {
+          code: 'invalid_body',
+          message: 'Site name is required.',
+        },
+      });
+    }
+
+    try {
+      const [org] = await db.select().from(organisations).limit(1);
+      if (!org) {
+        return res.status(400).json({
+          error: { code: 'no_organisation', message: 'No organisation found.' },
+        });
+      }
+
+      const [created] = await db
+        .insert(sites)
+        .values({
+          organisationId: org.id,
+          name: name.trim(),
+          address: typeof address === 'string' && address.trim() ? address.trim() : 'Auckland, NZ',
+          planName: typeof planName === 'string' && planName.trim() ? planName.trim() : 'Pro',
+          monthlyPriceNzd:
+            monthlyPriceNzd !== undefined && monthlyPriceNzd !== null
+              ? String(monthlyPriceNzd)
+              : '149.00',
+        })
+        .returning();
+
+      const prefix = created.name.replace(/[^a-zA-Z]/g, '').slice(0, 3).toUpperCase() || 'NEW';
+      const code = generateSetupCode(prefix);
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await db.insert(setupCodes).values({
+        code,
+        siteId: created.id,
+        expiresAt,
+        usedAt: null,
+      });
+
+      return res.status(201).json({
+        site: created,
+        setupCode: code,
+        setupCodeExpiresAt: expiresAt.toISOString(),
+      });
+    } catch (err: any) {
+      console.error('Failed to create site:', err);
+      return res.status(500).json({
+        error: {
+          code: 'server_error',
+          message: 'Could not create site.',
+        },
+      });
+    }
+  }
+);

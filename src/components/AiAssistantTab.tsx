@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Send, ArrowRight, AlertCircle } from 'lucide-react';
+import { authFetch } from '../firebase';
 
 interface ChatMessage {
   id: string;
@@ -63,7 +64,7 @@ export const AiAssistantTab: React.FC<AiAssistantTabProps> = ({ siteId, siteName
     setUnavailableBanner(null);
 
     try {
-      const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/assistant`, {
+      const res = await authFetch(`/api/sites/${encodeURIComponent(siteId)}/assistant`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

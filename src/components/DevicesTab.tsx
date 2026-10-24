@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Laptop, RefreshCw } from 'lucide-react';
 import { SiteAgentEmptyState } from './SiteAgentEmptyState';
+import { authFetch } from '../firebase';
 
 interface DeviceItem {
   id: string;
@@ -37,6 +38,7 @@ type FilterStatus = 'all' | 'online' | 'offline';
 interface DevicesTabProps {
   siteId: string;
   siteName: string;
+  userRole?: 'admin' | 'staff';
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -63,7 +65,11 @@ function formatRelativeTime(isoDate: string): string {
   return `${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago`;
 }
 
-export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
+export const DevicesTab: React.FC<DevicesTabProps> = ({
+  siteId,
+  siteName,
+  userRole = 'admin',
+}) => {
   const [data, setData] = useState<DevicesResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -76,7 +82,7 @@ export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
     else setIsRefreshing(true);
 
     try {
-      const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/devices`).catch(() => null);
+      const res = await authFetch(`/api/sites/${encodeURIComponent(siteId)}/devices`).catch(() => null);
       if (res && res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
         const json: DevicesResponse | null = await res.json().catch(() => null);
         if (json) {
@@ -209,6 +215,7 @@ export const DevicesTab: React.FC<DevicesTabProps> = ({ siteId, siteName }) => {
           hasReadings={hasReadings}
           setupCode={data?.setupCode ?? null}
           setupCodeExpiresAt={data?.setupCodeExpiresAt ?? null}
+          userRole={userRole}
           onCodeCreated={(newCode, expiresAt) => {
             setData((prev) =>
               prev ? { ...prev, setupCode: newCode, setupCodeExpiresAt: expiresAt } : prev

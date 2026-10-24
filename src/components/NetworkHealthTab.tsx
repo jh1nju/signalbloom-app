@@ -10,6 +10,7 @@ import {
   Repeat
 } from 'lucide-react';
 import { SiteAgentEmptyState } from './SiteAgentEmptyState';
+import { authFetch } from '../firebase';
 
 interface PartResult {
   key: string;
@@ -176,7 +177,11 @@ const clientAlertInFlight = new Map<
 >();
 const clientAlertNextRetryAt = new Map<string, number>();
 
-export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
+export const AlertAiSection: React.FC<{
+  alert: AlertItem;
+  userRole?: 'admin' | 'staff';
+}> = ({ alert, userRole = 'admin' }) => {
+  const isAdmin = userRole === 'admin';
   const cacheKey = `${alert.id}:${alert.severity}`;
   const cached = clientAlertAiCache.get(cacheKey);
 
@@ -246,7 +251,7 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
       if (!requestPromise) {
         requestPromise = (async () => {
           try {
-            const res = await fetch(
+            const res = await authFetch(
               `/api/sites/${encodeURIComponent(alert.siteId)}/alerts/${encodeURIComponent(alert.id)}/explain`,
               { method: 'POST' }
             );
@@ -323,7 +328,7 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
     let cancelled = false;
     const refreshAlertStatus = async () => {
       try {
-        const res = await fetch(
+        const res = await authFetch(
           `/api/sites/${encodeURIComponent(alert.siteId)}/alerts/${encodeURIComponent(alert.id)}/explain`,
           { method: 'POST' }
         );
@@ -356,7 +361,7 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
     setSubmittingRecId(rec.id);
     setActionErrorByRecId((prev) => ({ ...prev, [rec.id]: '' }));
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/sites/${encodeURIComponent(alert.siteId)}/recommendations/${encodeURIComponent(rec.id)}/self-handle`,
         {
           method: 'POST',
@@ -399,7 +404,7 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
     setSubmittingRecId(rec.id);
     setActionErrorByRecId((prev) => ({ ...prev, [rec.id]: '' }));
     try {
-      const res = await fetch(
+      const res = await authFetch(
         `/api/sites/${encodeURIComponent(alert.siteId)}/recommendations/${encodeURIComponent(rec.id)}/approve`,
         {
           method: 'POST',
@@ -521,8 +526,8 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
                       <span>{rec.actionText}</span>
                     </div>
 
-                    {/* Recommendations without a command_type show only the text */}
-                    {hasFixAction && !cmd && !isSelfHandled && !isConfirming && (
+                    {/* Recommendations without a command_type or for staff users show only the text */}
+                    {isAdmin && hasFixAction && !cmd && !isSelfHandled && !isConfirming && (
                       <div className="flex flex-wrap items-center gap-2 shrink-0">
                         <span className="text-[11px] font-medium text-slate-500 px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
                           Simulated in this prototype
@@ -553,7 +558,7 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
                   </div>
 
                   {/* Confirmation prompt when "Approve fix" is clicked */}
-                  {hasFixAction && isConfirming && !cmd && (
+                  {isAdmin && hasFixAction && isConfirming && !cmd && (
                     <div className="rounded-xl bg-slate-50/95 border border-slate-200 p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div className="space-y-0.5">
                         <p className="text-xs sm:text-sm font-semibold text-slate-900">
@@ -651,6 +656,7 @@ export const AlertAiSection: React.FC<{ alert: AlertItem }> = ({ alert }) => {
 interface NetworkHealthTabProps {
   siteId: string;
   siteName: string;
+  userRole?: 'admin' | 'staff';
 }
 
 const PART_TOOLTIPS: Record<string, string> = {
@@ -686,7 +692,11 @@ export function formatAlertDuration(firstSeenIso: string, endIso?: string): stri
   return `${days} ${days === 1 ? 'day' : 'days'}`;
 }
 
-export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, siteName }) => {
+export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({
+  siteId,
+  siteName,
+  userRole = 'admin',
+}) => {
   const [data, setData] = useState<HealthResponse | null>(null);
   const [activeAlerts, setActiveAlerts] = useState<AlertItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -701,8 +711,8 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
 
     try {
       const [healthRes, alertsRes] = await Promise.all([
-        fetch(`/api/sites/${encodeURIComponent(siteId)}/health`).catch(() => null),
-        fetch(`/api/sites/${encodeURIComponent(siteId)}/alerts`).catch(() => null),
+        authFetch(`/api/sites/${encodeURIComponent(siteId)}/health`).catch(() => null),
+        authFetch(`/api/sites/${encodeURIComponent(siteId)}/alerts`).catch(() => null),
       ]);
 
       if (
@@ -884,6 +894,7 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
           hasReadings={hasReadings}
           setupCode={data?.setupCode ?? null}
           setupCodeExpiresAt={data?.setupCodeExpiresAt ?? null}
+          userRole={userRole}
           onCodeCreated={(newCode, expiresAt) => {
             setData((prev) =>
               prev ? { ...prev, setupCode: newCode, setupCodeExpiresAt: expiresAt } : prev
@@ -982,7 +993,7 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({ siteId, site
                     </div>
                   </div>
 
-                  <AlertAiSection alert={alert} />
+                  <AlertAiSection alert={alert} userRole={userRole} />
                 </div>
               );
             })}

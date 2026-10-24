@@ -1,11 +1,11 @@
 import React from 'react';
-import { 
-  Activity, 
-  ShieldCheck, 
-  Laptop, 
-  Sparkles, 
-  Settings, 
-  X
+import {
+  Activity,
+  ShieldCheck,
+  Laptop,
+  Sparkles,
+  Settings,
+  X,
 } from 'lucide-react';
 import { SignalBloomLogo } from './SignalBloomLogo';
 
@@ -16,6 +16,7 @@ export interface TabItem {
   label: string;
   icon: React.ComponentType<{ className?: string; strokeWidth?: number }>;
   description: string;
+  adminOnly?: boolean;
 }
 
 export const TABS: TabItem[] = [
@@ -23,7 +24,8 @@ export const TABS: TabItem[] = [
     id: 'health',
     label: 'Network health',
     icon: Activity,
-    description: 'Overall health score, connection speed, response time, and trend graphs for your internet line.',
+    description:
+      'Overall health score, connection speed, response time, and trend graphs for your internet line.',
   },
   {
     id: 'security',
@@ -35,19 +37,23 @@ export const TABS: TabItem[] = [
     id: 'devices',
     label: 'Devices',
     icon: Laptop,
-    description: "An inventory of every computer, printer, phone, and equipment connected to this site's network.",
+    description:
+      "An inventory of every computer, printer, phone, and equipment connected to this site's network.",
   },
   {
     id: 'ai',
     label: 'AI assistant',
     icon: Sparkles,
-    description: 'Plain-English explanations of network problems, prioritised recommendations, and troubleshooting chat.',
+    description:
+      'Plain-English explanations of network problems, prioritised recommendations, and troubleshooting chat.',
   },
   {
     id: 'settings',
     label: 'Account & settings',
     icon: Settings,
-    description: 'Site locations, one-time agent setup codes, staff user permissions, and email alert preferences.',
+    description:
+      'Site locations, one-time agent setup codes, staff user permissions, and email alert preferences.',
+    adminOnly: true,
   },
 ];
 
@@ -56,6 +62,7 @@ interface SidebarProps {
   onSelectTab: (tab: TabId) => void;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
+  userRole?: 'admin' | 'staff';
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -63,7 +70,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectTab,
   isOpenMobile,
   onCloseMobile,
+  userRole = 'admin',
 }) => {
+  const visibleTabs = TABS.filter((tab) => !tab.adminOnly || userRole === 'admin');
+
   return (
     <>
       {/* Mobile backdrop */}
@@ -105,7 +115,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* Navigation Items (Sentence Case) */}
           <nav className="p-3 flex-1 space-y-1">
-            {TABS.map((tab) => {
+            {visibleTabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = currentTab === tab.id;
 

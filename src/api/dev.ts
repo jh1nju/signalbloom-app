@@ -12,8 +12,10 @@ import {
   formatDeviceFriendlyName,
   getCommandNounLower,
 } from '../services/geminiService.ts';
+import { requireAuth, requireAdmin } from './auth.ts';
 
 export const devRouter = Router();
+devRouter.use(requireAuth, requireAdmin);
 
 // GET /api/dev/available-codes
 devRouter.get('/available-codes', async (_req: Request, res: Response) => {

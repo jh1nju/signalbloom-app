@@ -5,6 +5,7 @@ import {
   Zap,
   Clock
 } from 'lucide-react';
+import { authFetch } from '../firebase';
 
 interface TestResult {
   title: string;
@@ -67,7 +68,7 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
 
   const loadAvailableCodes = async () => {
     try {
-      const res = await fetch('/api/dev/available-codes');
+      const res = await authFetch('/api/dev/available-codes');
       if (res.ok) {
         const data = await res.json();
         if (data.codes && data.codes.length > 0) {
@@ -85,7 +86,7 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
 
   const loadSitesAndFaultStatus = async () => {
     try {
-      const res = await fetch('/api/app-shell');
+      const res = await authFetch('/api/app-shell');
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.sites) && data.sites.length > 0) {
@@ -118,7 +119,7 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
 
     const checkFault = async () => {
       try {
-        const res = await fetch(`/api/dev/simulate-fault?site_id=${encodeURIComponent(faultSiteId)}`);
+        const res = await authFetch(`/api/dev/simulate-fault?site_id=${encodeURIComponent(faultSiteId)}`);
         if (res.ok && mounted) {
           const data = await res.json();
           setFaultRemainingSec(data?.status?.remainingSeconds ?? 0);
@@ -336,7 +337,7 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
     const start = performance.now();
 
     try {
-      const res = await fetch('/api/dev/simulate-fault', {
+      const res = await authFetch('/api/dev/simulate-fault', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ site_id: faultSiteId }),
@@ -379,7 +380,7 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
     const start = performance.now();
 
     try {
-      const res = await fetch('/api/dev/simulate-agent-result', {
+      const res = await authFetch('/api/dev/simulate-agent-result', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ site_id: faultSiteId }),
