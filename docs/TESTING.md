@@ -34,3 +34,8 @@
 | 2026-10-24 | Staff blocked from Admin endpoints | Pass | Approve fix, billing and Activity log returned 403 for Staff and worked for Admin |
 | 2026-10-24 | Staff interface | Pass | No Approve fix, billing or Activity log visible to Staff |
 | 2026-10-24 | Add a site | Pass | Added Demo Office; it showed Connect this site with a valid setup code |
+| 2026-10-25 | Published app sign-in | Pass | Admin and Staff sign in on the live URL after adding the domain to Firebase and creating the users in Firebase Auth |
+| 2026-10-25 | Real agent connects to the live app | Pass | Home Office registered with a setup code; score, devices and charts appeared within a minute |
+| 2026-10-25 | Full demo on the live URL | Pass | Demo fault, score drop, delay and packet loss alerts, AI explanation, approved "Restart the router", agent cleared the fault, alerts resolved and score recovered |
+| 2026-10-25 | Dev routes blocked in production | Pass | /dev/api-test returns not found on the live URL |
+| 2026-10-25 | Email alerts (automated) | Pass | emailAlerts.test.ts checks one email per critical alert, no repeats, and emails stay queued without a key |

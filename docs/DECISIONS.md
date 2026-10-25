@@ -121,3 +121,26 @@ Reason: least-privilege access, as the proposal's security section asks, without
 ## D-021: Adding a site
 Choice: Admins add a site in Account & Settings, which goes straight to its Connect this site card with a 24-hour setup code. Billing shows sample pricing only.
 Reason: a new customer goes from adding a site to live data in a few minutes, on one screen.
+
+## D-022: Email alerts
+Choice: one email per critical alert (never per check) to users with email alerts on, written to an outbox and sent through Resend when a key is set.
+Reason: users hear about serious problems without the dashboard open, without alert fatigue.
+
+## D-023: Getting the prototype ready for Cloud Run
+Context: Cloud Run only gives the app CPU while it handles a request, so background timers can pause.
+Choice: alerts are checked right after each reading arrives as well as on a 30-second timer, with each reading evaluated once. If the alert check fails, the reading is still saved.
+Reason: alerts stay reliable on Cloud Run without double counting.
+
+## D-024: A network-wide problem suggests restarting the router
+Context: delay and packet loss affect the whole network, not one device, so there was no device for a one-click fix to act on.
+Choice: for network-wide alerts, the AI recommendation includes "Restart the router", aimed at the device whose IP is the site's gateway.
+Reason: the user always gets one sensible fix to approve, aimed at a device the agent can find.
+
+## D-025: How the prototype maps to the proposal's production design
+| Proposal (production) | Prototype | Why |
+|---|---|---|
+| GKE Autopilot | Cloud Run | same containers, scales to zero, free to start |
+| HA VPN per site | agent sending outbound HTTPS with a site token | same goal, no network exposed, no cost |
+| Vertex AI anomaly models | threshold rules (D-014) | no real customer data to train on yet |
+| Gemini via Vertex AI | Gemini API (Flash Lite) | simpler set-up, same models |
+| BigQuery, tiered storage, multi-region | not built | not needed at prototype scale |
