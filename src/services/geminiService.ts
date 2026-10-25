@@ -580,27 +580,38 @@ export async function resolveRecommendationTargetDevice(params: {
 
   if (!targetMac && actionText) {
     const lowerText = actionText.toLowerCase();
-    for (const d of siteDevices) {
-      const rawHost = (d.hostname || '').toLowerCase();
-      const friendly = formatDeviceFriendlyName(d.hostname, d.mac).toLowerCase();
-      if (
-        (rawHost && rawHost !== 'unknown' && lowerText.includes(rawHost)) ||
-        (friendly && friendly !== 'unknown device' && lowerText.includes(friendly))
-      ) {
-        targetMac = d.mac;
-        break;
+    if (lowerText.includes('router')) {
+      const routerDev =
+        siteDevices.find((d) => d.ip && d.ip.trim().endsWith('.1')) ||
+        siteDevices.find((d) => (d.hostname || '').toLowerCase().includes('router'));
+      if (routerDev) {
+        targetMac = routerDev.mac;
+      }
+    }
+
+    if (!targetMac) {
+      for (const d of siteDevices) {
+        const rawHost = (d.hostname || '').toLowerCase();
+        const friendly = formatDeviceFriendlyName(d.hostname, d.mac).toLowerCase();
+        if (
+          (rawHost && rawHost !== 'unknown' && lowerText.includes(rawHost)) ||
+          (friendly && friendly !== 'unknown device' && lowerText.includes(friendly))
+        ) {
+          targetMac = d.mac;
+          break;
+        }
       }
     }
   }
 
   if (!targetMac && siteDevices.length > 0) {
+    const router = siteDevices.find(
+      (d) => (d.ip && d.ip.trim().endsWith('.1')) || (d.hostname || '').toLowerCase().includes('router')
+    );
     const receptionPc = siteDevices.find((d) =>
       (d.hostname || '').toLowerCase().startsWith('reception-pc')
     );
-    const router = siteDevices.find((d) =>
-      (d.hostname || '').toLowerCase().includes('router')
-    );
-    targetMac = receptionPc?.mac ?? router?.mac ?? siteDevices[0].mac;
+    targetMac = router?.mac ?? receptionPc?.mac ?? siteDevices[0].mac;
   }
 
   if (targetMac) {
@@ -637,11 +648,11 @@ async function ensureSeededRecommendationsForAlert(params: {
   const receptionPc = siteDevices.find((d) =>
     (d.hostname || '').toLowerCase().startsWith('reception-pc')
   );
-  const targetDev = alertDev ?? receptionPc ?? siteDevices[0];
-  const friendlyName = formatDeviceFriendlyName(targetDev?.hostname, targetDev?.mac);
+  let targetDev: (typeof devices.$inferSelect) | undefined = alertDev ?? receptionPc ?? siteDevices[0];
+  let friendlyName = targetDev ? formatDeviceFriendlyName(targetDev.hostname, targetDev.mac) : 'device';
 
   let primaryAction = `Restart ${friendlyName} to restore a stable network connection.`;
-  let primaryCommand: 'restart_device' | 'isolate_device' | 'reconnect_device' =
+  let primaryCommand: 'restart_device' | 'isolate_device' | 'reconnect_device' | null =
     'restart_device';
   let secondaryAction =
     'Check that the power cord and network cable are plugged in firmly.';
@@ -656,8 +667,20 @@ async function ensureSeededRecommendationsForAlert(params: {
     primaryCommand = 'restart_device';
     secondaryAction = `Check that ${friendlyName} is plugged into power and switched on.`;
   } else if (rule === 'delay' || rule === 'packet_loss' || rule === 'internet_down') {
-    primaryAction = `Restart ${friendlyName} to clear stalled network sessions at this site.`;
-    primaryCommand = 'restart_device';
+    // The router is the device whose IP is the site's gateway (usually ending in .1)
+    const routerDev =
+      siteDevices.find((d) => d.ip && d.ip.trim().endsWith('.1')) ||
+      siteDevices.find((d) => (d.hostname || '').toLowerCase().includes('router'));
+
+    if (routerDev) {
+      primaryAction = 'Restart the router';
+      primaryCommand = 'restart_device';
+      targetDev = routerDev;
+    } else {
+      primaryAction = 'Restart the router manually by unplugging its power cord for 30 seconds.';
+      primaryCommand = null;
+      targetDev = undefined;
+    }
     secondaryAction =
       'Check your main router and modem lights to confirm the internet line is steady.';
   }
@@ -676,7 +699,7 @@ async function ensureSeededRecommendationsForAlert(params: {
     .returning();
 
   if (row1) {
-    if (targetDev?.mac) {
+    if (targetDev?.mac && primaryCommand) {
       recommendationTargetMac.set(row1.id, targetDev.mac);
     }
     insertedRows.push(row1);

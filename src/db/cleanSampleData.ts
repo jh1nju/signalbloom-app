@@ -8,7 +8,15 @@
  */
 
 import { db, createPool } from './index.ts';
-import { devices, metricSamples, settings } from './schema.ts';
+import {
+  alerts,
+  commands,
+  devices,
+  emailOutbox,
+  metricSamples,
+  recommendations,
+  settings,
+} from './schema.ts';
 import { sql } from 'drizzle-orm';
 
 // Strict production guard
@@ -28,11 +36,18 @@ async function runCleanup() {
   await db.delete(metricSamples);
   console.log(`✓ Deleted ${metricCount.count} metric sample rows.`);
 
-  // 2. Delete all devices
+  // 2. Delete sample fix commands & outbox
+  await db.delete(emailOutbox);
+  await db.delete(commands);
+  await db.delete(recommendations);
+  await db.delete(alerts);
+  console.log('✓ Cleared sample alerts, recommendations, commands, and outbox.');
+
+  // 3. Delete all sample devices
   await db.delete(devices);
   console.log(`✓ Deleted ${deviceCount.count} device rows.`);
 
-  // 3. Update settings: sample_data = false
+  // 4. Update settings: sample_data = false
   await db
     .insert(settings)
     .values({

@@ -1,4 +1,5 @@
 import express from 'express';
+import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { agentRouter } from './src/api/agent.ts';
@@ -64,6 +65,9 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(vite.middlewares);
 } else {
   app.use(express.static('dist'));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.resolve('dist', 'index.html'));
+  });
 }
 
 const PORT = Number(process.env.PORT) || 3000;

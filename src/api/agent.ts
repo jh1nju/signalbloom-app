@@ -260,9 +260,13 @@ agentRouter.post(
         .set({ lastSeenAt: now })
         .where(eq(agents.id, agent.id));
 
-      // 4. Evaluate alert rules immediately so critical alerts open & queue emails without delay
-      if (acceptedCount > 0 || devicesList.length > 0) {
+      // 4. Evaluate alert rules immediately after each successful ingest
+      // (ensures alerts are processed promptly on Cloud Run request cycles without double counting;
+      // wrapped in try/catch so readings are always saved and 202 returned even if alert evaluation errors)
+      try {
         await evaluateAlertsForSite(agent.siteId);
+      } catch (alertErr) {
+        console.error('Failed to evaluate alerts after ingest:', alertErr);
       }
 
       return res.status(202).json({
