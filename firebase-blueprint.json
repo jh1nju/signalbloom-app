@@ -169,18 +169,5 @@
       "required": ["name", "ownerId", "createdAt"]
     }
   },
-  "firestore": {
-    "/signals/{signalId}": {
-      "schema": "Signal",
-      "description": "Market and technology signals tracked across industry segments."
-    },
-    "/blooms/{bloomId}": {
-      "schema": "Bloom",
-      "description": "Synthesized strategic opportunity briefs and product theses."
-    },
-    "/watchlists/{watchlistId}": {
-      "schema": "Watchlist",
-      "description": "User watchlists and curated signal collections."
-    }
-  }
+  "firestore": {}
 }

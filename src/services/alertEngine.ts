@@ -1,5 +1,14 @@
 import { db } from '../db/index.ts';
-import { agents, alerts, devices, metricSamples, settings, sites } from '../db/schema.ts';
+import {
+  agents,
+  alerts,
+  devices,
+  emailOutbox,
+  metricSamples,
+  settings,
+  sites,
+  users,
+} from '../db/schema.ts';
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import {
   DEMO_FAULT_CLEARED_LOG,
@@ -243,6 +252,158 @@ function formatOfflineDuration(ms: number): string {
   return `${days} ${days === 1 ? 'day' : 'days'}`;
 }
 
+function getDashboardBaseUrl(): string {
+  const raw = process.env.APP_URL?.trim();
+  if (raw && raw !== 'MY_APP_URL') {
+    return raw.replace(/\/+$/, '');
+  }
+  return 'https://ais-dev-w6yogul5sgdg7tx6odnq36-525512004506.asia-southeast1.run.app';
+}
+
+export async function sendQueuedEmailViaResend(params: {
+  outboxId: string;
+  toEmail: string;
+  subject: string;
+  body: string;
+  resendApiKey: string;
+  fetchFn?: typeof fetch;
+}): Promise<'sent' | 'failed'> {
+  const { outboxId, toEmail, subject, body, resendApiKey, fetchFn = fetch } = params;
+  try {
+    const res = await fetchFn('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'onboarding@resend.dev',
+        to: [toEmail],
+        subject,
+        text: body,
+      }),
+    });
+
+    if (res.ok) {
+      await db
+        .update(emailOutbox)
+        .set({
+          status: 'sent',
+          sentAt: new Date(),
+        })
+        .where(eq(emailOutbox.id, outboxId));
+      return 'sent';
+    } else {
+      await db
+        .update(emailOutbox)
+        .set({
+          status: 'failed',
+        })
+        .where(eq(emailOutbox.id, outboxId));
+      return 'failed';
+    }
+  } catch {
+    await db
+      .update(emailOutbox)
+      .set({
+        status: 'failed',
+      })
+      .where(eq(emailOutbox.id, outboxId));
+    return 'failed';
+  }
+}
+
+// Writes one row to email_outbox for each user in the site's organisation with email_alerts on
+// when a critical alert opens. Strictly one email per alert (per user), never per check.
+// If RESEND_API_KEY is set, sends via Resend from onboarding@resend.dev and marks sent or failed;
+// otherwise leaves queued.
+export async function queueAndSendCriticalAlertEmails(params: {
+  alertId: string;
+  siteId: string;
+  title: string;
+  reason: string;
+  fetchFn?: typeof fetch;
+}): Promise<void> {
+  const { alertId, siteId, title, reason, fetchFn } = params;
+
+  try {
+    const [site] = await db
+      .select({
+        id: sites.id,
+        name: sites.name,
+        organisationId: sites.organisationId,
+      })
+      .from(sites)
+      .where(eq(sites.id, siteId))
+      .limit(1);
+
+    if (!site) return;
+
+    const optedInUsers = await db
+      .select()
+      .from(users)
+      .where(
+        and(
+          eq(users.organisationId, site.organisationId),
+          eq(users.emailAlerts, true)
+        )
+      );
+
+    if (optedInUsers.length === 0) return;
+
+    const subject = `SignalBloom: ${title} at ${site.name}`;
+    const dashboardUrl = getDashboardBaseUrl();
+    const body = `${reason}\n\nOpen dashboard: ${dashboardUrl}`;
+    const rawResendKey = process.env.RESEND_API_KEY?.trim() || '';
+    const resendApiKey =
+      rawResendKey && rawResendKey !== 'MY_RESEND_API_KEY' ? rawResendKey : '';
+
+    for (const user of optedInUsers) {
+      // Deduplicate: never write more than one email per (userId, alertId)
+      const [existingEmail] = await db
+        .select({ id: emailOutbox.id })
+        .from(emailOutbox)
+        .where(
+          and(
+            eq(emailOutbox.userId, user.id),
+            eq(emailOutbox.alertId, alertId)
+          )
+        )
+        .limit(1);
+
+      if (existingEmail) {
+        continue;
+      }
+
+      const [inserted] = await db
+        .insert(emailOutbox)
+        .values({
+          userId: user.id,
+          alertId,
+          subject,
+          body,
+          status: 'queued',
+          createdAt: new Date(),
+          sentAt: null,
+        })
+        .returning();
+
+      if (inserted && resendApiKey) {
+        await sendQueuedEmailViaResend({
+          outboxId: inserted.id,
+          toEmail: user.email,
+          subject,
+          body,
+          resendApiKey,
+          fetchFn,
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Failed to queue or send critical alert emails:', err);
+  }
+}
+
 // Upsert or increment an open alert for (siteId, rule, deviceId)
 async function fireOrUpdateAlert(params: {
   siteId: string;
@@ -275,6 +436,7 @@ async function fireOrUpdateAlert(params: {
 
   if (existing) {
     const severityChanged = existing.severity !== severity;
+    const escalatedToCritical = existing.severity !== 'critical' && severity === 'critical';
     await db
       .update(alerts)
       .set({
@@ -290,19 +452,40 @@ async function fireOrUpdateAlert(params: {
       const { invalidateAlertRecommendations } = await import('./geminiService.ts');
       await invalidateAlertRecommendations(existing.id);
     }
+
+    if (escalatedToCritical) {
+      await queueAndSendCriticalAlertEmails({
+        alertId: existing.id,
+        siteId,
+        title,
+        reason,
+      });
+    }
   } else {
-    await db.insert(alerts).values({
-      siteId,
-      deviceId,
-      category,
-      severity,
-      rule,
-      reason: encodedReason,
-      status: 'open',
-      occurrenceCount: 1,
-      firstSeenAt: now,
-      lastSeenAt: now,
-    });
+    const [insertedAlert] = await db
+      .insert(alerts)
+      .values({
+        siteId,
+        deviceId,
+        category,
+        severity,
+        rule,
+        reason: encodedReason,
+        status: 'open',
+        occurrenceCount: 1,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      })
+      .returning();
+
+    if (insertedAlert && severity === 'critical') {
+      await queueAndSendCriticalAlertEmails({
+        alertId: insertedAlert.id,
+        siteId,
+        title,
+        reason,
+      });
+    }
   }
 }
 
@@ -677,6 +860,11 @@ export async function runDevSampleTick(): Promise<void> {
         .onConflictDoNothing({
           target: [metricSamples.siteId, metricSamples.measuredAt],
         });
+
+      await db
+        .update(agents)
+        .set({ lastSeenAt: now })
+        .where(eq(agents.id, agentRow.id));
     }
   } catch (err) {
     console.error('Error in dev sample generator tick:', err);

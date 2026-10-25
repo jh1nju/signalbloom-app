@@ -52,7 +52,7 @@ export const TABS: TabItem[] = [
     label: 'Account & settings',
     icon: Settings,
     description:
-      'Site locations, one-time agent setup codes, staff user permissions, and email alert preferences.',
+      'Sites, setup codes, billing, users, email alerts, and activity log.',
     adminOnly: true,
   },
 ];

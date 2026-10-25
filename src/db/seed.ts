@@ -101,35 +101,35 @@ async function runSeed() {
     {
       name: 'Manukau Clinic',
       address: '15 Putney Way, Manukau, Auckland 2104',
-      planName: 'Pro',
-      monthlyPriceNzd: '149.00',
+      planName: 'SignalBloom Standard',
+      monthlyPriceNzd: '29.00',
       codePrefix: 'MNK',
     },
     {
       name: 'Papatoetoe Clinic',
       address: '128 St George Street, Papatoetoe, Auckland 2025',
-      planName: 'Pro',
-      monthlyPriceNzd: '149.00',
+      planName: 'SignalBloom Standard',
+      monthlyPriceNzd: '29.00',
       codePrefix: 'PPT',
     },
     {
       name: 'Botany Clinic',
       address: '588 Chapel Road, Botany Downs, Auckland 2013',
-      planName: 'Enterprise',
-      monthlyPriceNzd: '199.00',
+      planName: 'SignalBloom Standard',
+      monthlyPriceNzd: '29.00',
       codePrefix: 'BTN',
     },
     {
       name: 'New Office (no agent)',
       address: '42 Queen Street, Auckland CBD 1010',
-      planName: 'Pro',
-      monthlyPriceNzd: '149.00',
+      planName: 'SignalBloom Standard',
+      monthlyPriceNzd: '29.00',
       codePrefix: 'NEW',
     },
   ];
 
-  // Expiration set to 7 days from now
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  // Expiration set to 24 hours from now
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const generatedCodes: { siteName: string; code: string; expiresAt: string }[] = [];
 
   for (const def of siteDefs) {

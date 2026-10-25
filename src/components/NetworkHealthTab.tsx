@@ -657,6 +657,11 @@ interface NetworkHealthTabProps {
   siteId: string;
   siteName: string;
   userRole?: 'admin' | 'staff';
+  initialConnectSetup?: {
+    siteId: string;
+    setupCode: string;
+    setupCodeExpiresAt: string;
+  } | null;
 }
 
 const PART_TOOLTIPS: Record<string, string> = {
@@ -696,10 +701,35 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({
   siteId,
   siteName,
   userRole = 'admin',
+  initialConnectSetup = null,
 }) => {
-  const [data, setData] = useState<HealthResponse | null>(null);
+  const buildInitialConnectHealthData = useCallback(
+    (targetSiteId: string): HealthResponse | null => {
+      if (initialConnectSetup && initialConnectSetup.siteId === targetSiteId) {
+        return {
+          siteId: targetSiteId,
+          hasRegisteredAgent: false,
+          hasReadings: false,
+          setupCode: initialConnectSetup.setupCode,
+          setupCodeExpiresAt: initialConnectSetup.setupCodeExpiresAt,
+          score: 100,
+          statusWord: 'Healthy',
+          statusColor: 'green',
+          parts: [],
+          lastEvaluatedAt: new Date().toISOString(),
+          charts: { telemetry: [], bandwidth: [] },
+        };
+      }
+      return null;
+    },
+    [initialConnectSetup]
+  );
+
+  const [data, setData] = useState<HealthResponse | null>(() =>
+    buildInitialConnectHealthData(siteId)
+  );
   const [activeAlerts, setActiveAlerts] = useState<AlertItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !buildInitialConnectHealthData(siteId));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
   const [activeTooltip, setActiveTooltip] = useState<string | null>(null);
@@ -746,10 +776,11 @@ export const NetworkHealthTab: React.FC<NetworkHealthTabProps> = ({
   }, [siteId]);
 
   useEffect(() => {
-    setData(null);
+    const initialData = buildInitialConnectHealthData(siteId);
+    setData(initialData);
     setActiveAlerts([]);
-    fetchHealthData(false);
-  }, [fetchHealthData]);
+    fetchHealthData(Boolean(initialData));
+  }, [siteId, buildInitialConnectHealthData, fetchHealthData]);
 
   const hasRegisteredAgent = data?.hasRegisteredAgent ?? true;
   const hasReadings = data?.hasReadings ?? true;

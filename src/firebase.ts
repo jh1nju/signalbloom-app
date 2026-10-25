@@ -4,16 +4,15 @@ import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
   signOut,
+  setPersistence,
+  browserLocalPersistence,
 } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export const currentProjectId = firebaseConfig.projectId;
-export const currentDatabaseId = firebaseConfig.firestoreDatabaseId;
 
 export interface AuthUserProfile {
   id: string;
@@ -22,6 +21,7 @@ export interface AuthUserProfile {
   email: string;
   name: string;
   role: 'admin' | 'staff';
+  emailAlerts?: boolean;
 }
 
 let inMemoryAuthToken: string | null = null;
@@ -30,6 +30,10 @@ export function setAuthToken(token: string | null) {
   inMemoryAuthToken = token;
 }
 
+/**
+ * Gets a fresh ID token directly from Firebase Auth currentUser so that
+ * Firebase refreshes it automatically, without storing tokens in localStorage or cookies.
+ */
 export async function getAuthToken(): Promise<string | null> {
   if (auth.currentUser) {
     try {
@@ -37,7 +41,7 @@ export async function getAuthToken(): Promise<string | null> {
       inMemoryAuthToken = idToken;
       return idToken;
     } catch {
-      // Fallback to in-memory token
+      // Fallback to latest in-memory token if refresh fails temporarily
     }
   }
   return inMemoryAuthToken;
@@ -64,6 +68,13 @@ export async function signInWithEmail(
 ): Promise<{ user: AuthUserProfile; token: string }> {
   const cleanEmail = email.trim().toLowerCase();
 
+  // Explicitly set browserLocalPersistence before signing in
+  try {
+    await setPersistence(auth, browserLocalPersistence);
+  } catch (err) {
+    console.warn('Could not set browserLocalPersistence:', err);
+  }
+
   // 1. Try client-side Firebase Auth signInWithEmailAndPassword first
   try {
     const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
@@ -82,7 +93,7 @@ export async function signInWithEmail(
       }
     }
   } catch {
-    // Proceed to backend /api/auth/sign-in which links/provisions the Firebase user
+    // Proceed to backend /api/auth/sign-in which links/provisions the Firebase user if needed
   }
 
   // 2. Call backend /api/auth/sign-in
@@ -97,8 +108,9 @@ export async function signInWithEmail(
     throw new Error(data?.error?.message || 'Incorrect email or password.');
   }
 
-  // If Firebase Email/Password was provisioned during /api/auth/sign-in, sync client auth state
+  // Ensure persistence before signing into Firebase client with newly provisioned credentials
   try {
+    await setPersistence(auth, browserLocalPersistence);
     const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
     const firebaseIdToken = await credential.user.getIdToken();
     inMemoryAuthToken = firebaseIdToken;
@@ -112,69 +124,4 @@ export async function signInWithEmail(
 export async function signOutUser(): Promise<void> {
   inMemoryAuthToken = null;
   await signOut(auth).catch(() => {});
-}
-
-export enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-export interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
-}
-
-export function handleFirestoreError(
-  error: unknown,
-  operationType: OperationType,
-  path: string | null
-) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
-    },
-    operationType,
-    path,
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-export async function testConnection(): Promise<{ ok: boolean; message: string }> {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    return { ok: true, message: `Connected to Cloud Project: ${firebaseConfig.projectId}` };
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firebase client is offline or initializing.');
-      return { ok: false, message: 'Client offline or initializing' };
-    }
-    return { ok: true, message: `Connected to Cloud Project: ${firebaseConfig.projectId}` };
-  }
 }

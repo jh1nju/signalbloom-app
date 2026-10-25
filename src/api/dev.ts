@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../db/index.ts';
-import { agents, auditLog, commands, devices, setupCodes, sites } from '../db/schema.ts';
+import { agents, auditLog, commands, devices, metricSamples, setupCodes, sites } from '../db/schema.ts';
 import {
   clearSimulatedFaultOnApprovedFix,
+  evaluateAlertsForSite,
   getAllSimulatedFaults,
   getSimulatedFaultStatus,
   startSimulatedFault,
@@ -58,6 +59,28 @@ devRouter.post('/simulate-fault', async (req: Request, res: Response) => {
     }
 
     const result = await startSimulatedFault(site.id);
+
+    // Insert 3 consecutive fault readings and evaluate alerts immediately so critical alerts open right away
+    const nowMs = Date.now();
+    for (let i = 2; i >= 0; i--) {
+      const sampleTime = new Date(nowMs - i * 1000);
+      await db
+        .insert(metricSamples)
+        .values({
+          siteId: site.id,
+          measuredAt: sampleTime,
+          latencyMs: result.delayMs,
+          packetLossPct: result.packetLossPct,
+          internetUp: true,
+          downloadMbps: null,
+          uploadMbps: null,
+          errorRatePct: null,
+        })
+        .onConflictDoNothing({
+          target: [metricSamples.siteId, metricSamples.measuredAt],
+        });
+    }
+    await evaluateAlertsForSite(site.id);
 
     return res.status(200).json({
       simulated_fault: {

@@ -45,6 +45,11 @@ export default function App() {
   });
   const [isSampleData, setIsSampleData] = useState<boolean>(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const [initialConnectSetup, setInitialConnectSetup] = useState<{
+    siteId: string;
+    setupCode: string;
+    setupCodeExpiresAt: string;
+  } | null>(null);
 
   // Handle browser popstate navigation
   useEffect(() => {
@@ -67,11 +72,18 @@ export default function App() {
             const data = await res.json();
             if (data?.user) {
               setCurrentUser(data.user);
+            } else {
+              setCurrentUser(null);
             }
+          } else {
+            setCurrentUser(null);
           }
         } catch {
-          // Ignore transient error
+          setCurrentUser(null);
         }
+      } else {
+        setCurrentUser(null);
+        setAuthToken(null);
       }
       setAuthChecking(false);
     });
@@ -112,9 +124,9 @@ export default function App() {
     }
   }, [currentUser, fetchShellData]);
 
-  // Ensure staff cannot stay on admin-only settings tab
+  // Ensure Staff can never remain on the Admin-only Account & settings tab
   useEffect(() => {
-    if (currentUser?.role === 'staff' && currentTab === 'settings') {
+    if (currentUser && currentUser.role !== 'admin' && currentTab === 'settings') {
       setCurrentTab('health');
     }
   }, [currentUser, currentTab]);
@@ -128,6 +140,10 @@ export default function App() {
     await signOutUser();
     setCurrentUser(null);
     setCurrentTab('health');
+    if (window.location.pathname !== '/') {
+      window.history.pushState({}, '', '/');
+      setPath('/');
+    }
   };
 
   if (authChecking) {
@@ -147,6 +163,7 @@ export default function App() {
   }
 
   const isAdmin = currentUser.role === 'admin';
+  const effectiveTab: TabId = !isAdmin && currentTab === 'settings' ? 'health' : currentTab;
 
   // Dedicated dev-only testing route (requires admin role and not mounted in production)
   if (path === '/dev/api-test') {
@@ -183,10 +200,18 @@ export default function App() {
         </div>
       );
     }
-    return <DevApiTest selectedSiteId={selectedSiteId} />;
+    return (
+      <DevApiTest
+        selectedSiteId={selectedSiteId}
+        onBack={() => {
+          window.history.pushState({}, '', '/');
+          setPath('/');
+        }}
+      />
+    );
   }
 
-  const activeTabItem = TABS.find((t) => t.id === currentTab) || TABS[0];
+  const activeTabItem = TABS.find((t) => t.id === effectiveTab) || TABS[0];
   const activeSite = sites.find((s) => s.id === selectedSiteId) || sites[0];
 
   return (
@@ -194,8 +219,11 @@ export default function App() {
       <div className="h-full w-full flex flex-col lg:grid lg:grid-cols-[260px_1fr] gap-4">
         {/* Left Sidebar */}
         <Sidebar
-          currentTab={currentTab}
-          onSelectTab={setCurrentTab}
+          currentTab={effectiveTab}
+          onSelectTab={(tab) => {
+            if (tab === 'settings' && !isAdmin) return;
+            setCurrentTab(tab);
+          }}
           isOpenMobile={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
           userRole={currentUser.role}
@@ -216,34 +244,50 @@ export default function App() {
           />
 
           {/* Tab Content View */}
-          {currentTab === 'health' ? (
+          {effectiveTab === 'health' ? (
             <NetworkHealthTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
               userRole={currentUser.role}
+              initialConnectSetup={initialConnectSetup}
             />
-          ) : currentTab === 'security' ? (
+          ) : effectiveTab === 'security' ? (
             <SecurityTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
               userRole={currentUser.role}
             />
-          ) : currentTab === 'devices' ? (
+          ) : effectiveTab === 'devices' ? (
             <DevicesTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
               userRole={currentUser.role}
             />
-          ) : currentTab === 'ai' ? (
+          ) : effectiveTab === 'ai' ? (
             <AiAssistantTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
             />
-          ) : currentTab === 'settings' && isAdmin ? (
+          ) : effectiveTab === 'settings' && isAdmin ? (
             <AccountSettingsTab
               siteId={selectedSiteId}
               siteName={activeSite?.name || 'Selected site'}
               organisationName={organisationName}
+              userRole={currentUser.role}
+              onSiteCreatedAndConnect={({ site, setupCode, setupCodeExpiresAt }) => {
+                setSites((prev) => {
+                  const exists = prev.some((s) => s.id === site.id);
+                  return exists ? prev : [...prev, site];
+                });
+                setInitialConnectSetup({
+                  siteId: site.id,
+                  setupCode,
+                  setupCodeExpiresAt,
+                });
+                handleSelectSite(site.id);
+                setCurrentTab('health');
+                void fetchShellData();
+              }}
             />
           ) : (
             <TabPlaceholder tab={activeTabItem} currentSite={activeSite} />

@@ -12,7 +12,10 @@ import {
   auditLog,
 } from '../db/schema.ts';
 import { formatDeviceFriendlyName } from '../services/geminiService.ts';
-import { clearSimulatedFaultOnApprovedFix } from '../services/alertEngine.ts';
+import {
+  clearSimulatedFaultOnApprovedFix,
+  evaluateAlertsForSite,
+} from '../services/alertEngine.ts';
 
 export const agentRouter = Router();
 
@@ -256,6 +259,11 @@ agentRouter.post(
         .update(agents)
         .set({ lastSeenAt: now })
         .where(eq(agents.id, agent.id));
+
+      // 4. Evaluate alert rules immediately so critical alerts open & queue emails without delay
+      if (acceptedCount > 0 || devicesList.length > 0) {
+        await evaluateAlertsForSite(agent.siteId);
+      }
 
       return res.status(202).json({
         accepted: acceptedCount,

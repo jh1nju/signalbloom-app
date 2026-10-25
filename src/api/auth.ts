@@ -22,6 +22,7 @@ export interface AuthenticatedUser {
   email: string;
   name: string;
   role: 'admin' | 'staff';
+  emailAlerts: boolean;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -130,6 +131,7 @@ async function resolveAndLinkUser(
       email: byUid.email,
       name: byUid.name,
       role: byUid.role,
+      emailAlerts: byUid.emailAlerts,
     };
   }
 
@@ -157,6 +159,7 @@ async function resolveAndLinkUser(
         email: resolved.email,
         name: resolved.name,
         role: resolved.role,
+        emailAlerts: resolved.emailAlerts,
       };
     }
   }
@@ -399,6 +402,7 @@ authRouter.post('/auth/sign-in', async (req: Request, res: Response) => {
         email: dbUser.email,
         name: dbUser.name,
         role: dbUser.role,
+        emailAlerts: dbUser.emailAlerts,
       },
       provider: 'firebase',
     });

@@ -25,9 +25,10 @@ interface SiteOption {
 
 interface DevApiTestProps {
   selectedSiteId?: string;
+  onBack?: () => void;
 }
 
-export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
+export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId, onBack }) => {
   // Production guard
   const isProd = import.meta.env.PROD || process.env.NODE_ENV === 'production';
   if (isProd) {
@@ -448,12 +449,20 @@ export const DevApiTest: React.FC<DevApiTestProps> = ({ selectedSiteId }) => {
           </div>
 
           <div className="flex items-center gap-2">
-            <a
-              href="/"
-              className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors"
+            <button
+              type="button"
+              onClick={() => {
+                if (onBack) {
+                  onBack();
+                } else {
+                  window.history.pushState({}, '', '/');
+                  window.dispatchEvent(new PopStateEvent('popstate'));
+                }
+              }}
+              className="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-800 transition-colors cursor-pointer"
             >
               ← Back to app
-            </a>
+            </button>
           </div>
         </div>
 

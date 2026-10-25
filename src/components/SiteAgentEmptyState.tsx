@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PlugZap, KeyRound, Radio } from 'lucide-react';
+import { PlugZap, KeyRound, Radio, Copy, Check, Clock } from 'lucide-react';
 import { authFetch } from '../firebase';
 
 interface SiteAgentEmptyStateProps {
@@ -10,6 +10,18 @@ interface SiteAgentEmptyStateProps {
   setupCodeExpiresAt?: string | null;
   onCodeCreated?: (newCode: string, expiresAt: string) => void;
   userRole?: 'admin' | 'staff';
+}
+
+function formatExpiryTimestamp(isoDate: string | null | undefined): string {
+  if (!isoDate) return 'Valid for 24 hours';
+  const date = new Date(isoDate);
+  if (isNaN(date.getTime())) return 'Valid for 24 hours';
+  return `Expires ${date.toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`;
 }
 
 export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
@@ -25,17 +37,32 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
   const [localCode, setLocalCode] = useState<string | null>(setupCode);
   const [localExpiresAt, setLocalExpiresAt] = useState<string | null>(setupCodeExpiresAt ?? null);
   const [creatingCode, setCreatingCode] = useState<boolean>(false);
+  const [copied, setCopied] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalCode(setupCode);
     setLocalExpiresAt(setupCodeExpiresAt ?? null);
     setErrorMessage(null);
+    setCopied(false);
   }, [siteId, setupCode, setupCodeExpiresAt]);
 
   const isCodeValid = Boolean(
     localCode && (!localExpiresAt || new Date(localExpiresAt).getTime() > Date.now())
   );
+
+  const handleCopyCode = async () => {
+    if (!localCode) return;
+    try {
+      await navigator.clipboard.writeText(localCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback copy if clipboard API restricted
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   const handleCreateSetupCode = async () => {
     if (!siteId || creatingCode || !isAdmin) return;
@@ -53,6 +80,7 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
         if (json?.code) {
           setLocalCode(json.code);
           setLocalExpiresAt(json.expiresAt ?? null);
+          setCopied(false);
           onCodeCreated?.(json.code, json.expiresAt);
         }
       } else {
@@ -119,7 +147,7 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
                   {isCodeValid && localCode ? (
                     <>
                       <code
-                        className="font-mono font-bold px-2.5 py-1 rounded-lg text-sm sm:text-base border"
+                        className="font-mono font-bold px-2.5 py-1 rounded-lg text-sm sm:text-base border tabular-nums"
                         style={{
                           background: 'rgba(0, 128, 208, 0.08)',
                           color: 'var(--accent-ocean)',
@@ -136,7 +164,27 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
                 </span>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                {isCodeValid && localCode && (
+                  <button
+                    type="button"
+                    onClick={handleCopyCode}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-all cursor-pointer shadow-2xs"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="text-emerald-700">Copied</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Copy</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleCreateSetupCode}
@@ -156,9 +204,13 @@ export const SiteAgentEmptyState: React.FC<SiteAgentEmptyStateProps> = ({
                   }
                 >
                   <KeyRound className="w-3.5 h-3.5" />
-                  <span>{creatingCode ? 'Creating setup code...' : 'Create new setup code'}</span>
+                  <span>{creatingCode ? 'Creating code...' : 'New code'}</span>
                 </button>
-                <span className="text-xs text-slate-500">Valid for 24 hours</span>
+
+                <span className="inline-flex items-center gap-1.5 text-xs text-slate-500 tabular-nums">
+                  <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  <span>{formatExpiryTimestamp(localExpiresAt)} (24 hours)</span>
+                </span>
               </div>
 
               {errorMessage && (
