@@ -112,3 +112,12 @@ Context: the proposal promises one-click fixes, but users must stay in control (
 Options: fix automatically; one-click fix without confirmation; offer both a manual choice and an approved fix with confirmation.
 Choice: each AI recommendation with a device action shows "I'll do it myself" and "Approve fix". Approving asks for confirmation, then queues a command the agent picks up. The card shows the status (waiting, running, done or didn't work) with the agent's message. Only one pending fix per device and type is allowed. Every approval, manual choice and result is written to the audit log and shown in Account & Settings as an Activity log. Fixes are labelled "Simulated in this prototype".
 Reason: the user always decides, nothing runs twice, and the Activity log gives the approval and audit record the proposal's Accountability value calls for.
+
+## D-020: Sign-in and roles
+Context: once published, anyone with the link could open the dashboard, and SPEC.md defines Admin and Staff.
+Choice: Firebase Auth email and password sign-in. Admin can do everything; Staff sees Network health, Security, Devices and the AI assistant, but can't approve fixes, see billing, manage sites or setup codes, or see the Activity log. Roles are checked in the backend (403) as well as hidden in the interface. The agent keeps using its site token, not a user sign-in.
+Reason: least-privilege access, as the proposal's security section asks, without changing how the agent connects.
+
+## D-021: Adding a site
+Choice: Admins add a site in Account & Settings, which goes straight to its Connect this site card with a 24-hour setup code. Billing shows sample pricing only.
+Reason: a new customer goes from adding a site to live data in a few minutes, on one screen.

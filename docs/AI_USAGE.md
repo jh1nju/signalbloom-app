@@ -24,3 +24,5 @@
 | 2026-10-23 | Google AI Studio (Gemini 4 Argon) | Approve-fix buttons, fix status, duplicate check, audit logging, Activity log, dev Simulate agent result | Ran each approve-fix check in the preview |
 | 2026-10-23 | Claude (claude.ai chat) | Approve-fix prompt and checks; spotted that the demo fault would block recovery and wrote the agent change prompt | Chose to clear the fault only on a successful fix |
 | 2026-10-24 | Claude Code | Agent change: an approved fix clears the demo fault, with tests | Ran all tests and the live check against the fake cloud |
+| 2026-10-24 | Google AI Studio (Gemini 4 Argon) | Firebase sign-in and roles, Account & Settings, Add site, setup codes | Tested both accounts and the 403 checks |
+| 2026-10-24 | Claude (claude.ai chat) | Sign-in, roles, Account & Settings and email prompts; role test prompt | Chose to leave self-service sign-up and MFA for after the demo |

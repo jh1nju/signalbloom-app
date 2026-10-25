@@ -11,3 +11,7 @@
 - Dev-only tools (sample data generator, Simulate fault) are switched off and their routes are not available in production.
 - AI explanations depend on the Gemini API's availability and quota. When it's unavailable, a rule-based explanation is shown instead.
 - The app uses the Gemini API free tier (500 requests a day per model). Heavier use would need a paid key.
+- No multi-factor sign-in yet.
+- No self-service sign-up for new organisations; accounts are created by the team.
+- Billing shows sample pricing; no payments are taken.
+- No email alerts yet; the email_outbox table exists, but nothing sends to it.

@@ -31,3 +31,6 @@
 | 2026-10-23 | Activity log | Pass | The approval and the result appeared in Account & Settings, newest first |
 | 2026-10-24 | Approved fix clears the demo fault | Pass | With the fake cloud: fault on, fix queued, agent logged DEMO FAULT OFF and the demo_fault file was removed |
 | 2026-10-24 | Failed fix keeps the demo fault | Pass | A fix for a made-up MAC failed and the fault stayed on |
+| 2026-10-24 | Staff blocked from Admin endpoints | Pass | Approve fix, billing and Activity log returned 403 for Staff and worked for Admin |
+| 2026-10-24 | Staff interface | Pass | No Approve fix, billing or Activity log visible to Staff |
+| 2026-10-24 | Add a site | Pass | Added Demo Office; it showed Connect this site with a valid setup code |
