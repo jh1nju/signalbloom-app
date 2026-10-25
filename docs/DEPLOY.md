@@ -6,3 +6,6 @@
 - Production runs with NODE_ENV=production, so dev pages, the sample data generator and Simulate fault are off.
 - Gemini runs on a paid Tier 1 key with US$5 of prepaid credit and no auto-reload, so spending can't exceed US$5.
 - Connecting an agent: add a site in Account & Settings, copy its setup code, set cloud_url (the live URL) and setup_code in the agent's config.yaml, then run python -m signalbloom_agent.
+
+## Agent exe
+- Agent exe built and tested (v1.0-prototype, 224 tests passing, no embedded secrets). Download from GitHub releases. Teammates follow the install guide independently.

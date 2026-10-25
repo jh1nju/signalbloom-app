@@ -39,3 +39,6 @@
 | 2026-10-25 | Full demo on the live URL | Pass | Demo fault, score drop, delay and packet loss alerts, AI explanation, approved "Restart the router", agent cleared the fault, alerts resolved and score recovered |
 | 2026-10-25 | Dev routes blocked in production | Pass | /dev/api-test returns not found on the live URL |
 | 2026-10-25 | Email alerts (automated) | Pass | emailAlerts.test.ts checks one email per critical alert, no repeats, and emails stay queued without a key |
+
+## Teammate testing
+Teammates download SignalBloom-Agent.exe from the v1.0-prototype release. They create their own site in the dashboard, run the agent, and confirm checks C1–C12 (including the demo fault test). No further setup needed.
