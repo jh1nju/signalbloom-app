@@ -62,7 +62,7 @@ async function runSeed() {
       .insert(users)
       .values({
         organisationId: org.id,
-        firebaseUid: 'dev-admin-firebase-uid',
+        firebaseUid: 'BYrStZQwO2UfJGzuQvjbDcdxjLI3',
         email: adminEmail,
         name: 'Dr. Sarah Chen',
         role: 'admin',
@@ -84,7 +84,7 @@ async function runSeed() {
       .insert(users)
       .values({
         organisationId: org.id,
-        firebaseUid: 'dev-staff-firebase-uid',
+        firebaseUid: 'x6vJLSug4wSahwsKXPW2hbCG2kG3',
         email: staffEmail,
         name: 'Liam Patel',
         role: 'staff',

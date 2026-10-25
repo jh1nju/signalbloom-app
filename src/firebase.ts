@@ -75,50 +75,32 @@ export async function signInWithEmail(
     console.warn('Could not set browserLocalPersistence:', err);
   }
 
-  // 1. Try client-side Firebase Auth signInWithEmailAndPassword first
+  let credential;
   try {
-    const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
-    const idToken = await credential.user.getIdToken();
-    inMemoryAuthToken = idToken;
-
-    const meRes = await fetch('/api/auth/me', {
-      headers: {
-        Authorization: `Bearer ${idToken}`,
-      },
-    });
-    if (meRes.ok) {
-      const meData = await meRes.json();
-      if (meData?.user) {
-        return { user: meData.user, token: idToken };
-      }
-    }
+    credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
   } catch {
-    // Proceed to backend /api/auth/sign-in which links/provisions the Firebase user if needed
+    throw new Error('Incorrect email or password.');
   }
 
-  // 2. Call backend /api/auth/sign-in
-  const res = await fetch('/api/auth/sign-in', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: cleanEmail, password }),
+  const idToken = await credential.user.getIdToken();
+  inMemoryAuthToken = idToken;
+
+  const meRes = await fetch('/api/auth/me', {
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
   });
 
-  const data = await res.json().catch(() => null);
-  if (!res.ok || !data?.token || !data?.user) {
-    throw new Error(data?.error?.message || 'Incorrect email or password.');
+  const meData = await meRes.json().catch(() => null);
+  if (!meRes.ok || !meData?.user) {
+    inMemoryAuthToken = null;
+    await signOut(auth).catch(() => {});
+    throw new Error(
+      meData?.error?.message || 'This account is not linked to a SignalBloom user.'
+    );
   }
 
-  // Ensure persistence before signing into Firebase client with newly provisioned credentials
-  try {
-    await setPersistence(auth, browserLocalPersistence);
-    const credential = await signInWithEmailAndPassword(auth, cleanEmail, password);
-    const firebaseIdToken = await credential.user.getIdToken();
-    inMemoryAuthToken = firebaseIdToken;
-    return { user: data.user, token: firebaseIdToken };
-  } catch {
-    inMemoryAuthToken = String(data.token);
-    return { user: data.user, token: String(data.token) };
-  }
+  return { user: meData.user, token: idToken };
 }
 
 export async function signOutUser(): Promise<void> {
