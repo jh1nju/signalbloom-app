@@ -144,3 +144,9 @@ Reason: the user always gets one sensible fix to approve, aimed at a device the 
 | Vertex AI anomaly models | threshold rules (D-014) | no real customer data to train on yet |
 | Gemini via Vertex AI | Gemini API (Flash Lite) | simpler set-up, same models |
 | BigQuery, tiered storage, multi-region | not built | not needed at prototype scale |
+
+## D-026: The agent as a Windows program
+Context: teammates testing the prototype need to run the agent without installing Python, and the agent's config.yaml holds the site token.
+Options: install Python and run from source; a single Windows program built with PyInstaller.
+Choice: build_exe.ps1 builds dist\SignalBloom-Agent.exe (PyInstaller, one file, console window). On the first run it asks for the setup code, registers, and saves config.yaml and data\ in the folder next to the exe; later runs start straight away. The build contains only the agent's code and config.example.yaml as the template. After building, the script lists the exe's contents and deletes the exe if it finds config.yaml, data\, buffer.jsonl, commands.json, rejected.jsonl, agent.log, demo_fault or the fake cloud's state file inside. The exe isn't signed, so Windows warns that it is from an unknown publisher.
+Reason: anyone can start the agent with a double-click and a setup code. The exe is shared through GitHub releases, so the build checks itself and a site token can never be shipped inside it by mistake.
