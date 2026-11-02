@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS "sites" (
   "address" TEXT NOT NULL,
   "plan_name" TEXT NOT NULL,
   "monthly_price_nzd" NUMERIC(10, 2) NOT NULL,
-  "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  "created_at" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "deleted_at" TIMESTAMPTZ
 );
 
 -- 4. setup_codes

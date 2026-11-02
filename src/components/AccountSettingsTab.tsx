@@ -17,6 +17,10 @@ import {
   Users as UsersIcon,
   PlugZap,
   ShieldAlert,
+  Pencil,
+  Trash2,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 import { authFetch } from '../firebase';
 import { SiteAgentEmptyState } from './SiteAgentEmptyState';
@@ -117,6 +121,8 @@ interface AccountSettingsTabProps {
     setupCode: string;
     setupCodeExpiresAt: string;
   }) => void;
+  onSiteRenamed?: (siteId: string, newName: string) => void;
+  onSiteDeleted?: (siteId: string) => void;
 }
 
 function formatActivityTimestamp(isoDate: string | null | undefined): string {
@@ -150,6 +156,8 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
   organisationName,
   userRole = 'admin',
   onSiteCreatedAndConnect,
+  onSiteRenamed,
+  onSiteDeleted,
 }) => {
   const isAdmin = userRole === 'admin';
 
@@ -169,6 +177,21 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
   const [newSiteAddress, setNewSiteAddress] = useState<string>('');
   const [addingSite, setAddingSite] = useState<boolean>(false);
   const [addSiteError, setAddSiteError] = useState<string | null>(null);
+
+  // Rename site modal state
+  const [editingSite, setEditingSite] = useState<AdminSiteSummaryItem | null>(null);
+  const [renameInput, setRenameInput] = useState<string>('');
+  const [renamingSite, setRenamingSite] = useState<boolean>(false);
+
+  // Delete site confirmation modal state
+  const [deletingSiteTarget, setDeletingSiteTarget] = useState<AdminSiteSummaryItem | null>(null);
+  const [deletingSite, setDeletingSite] = useState<boolean>(false);
+
+  // Toast / alert notification for rename & delete actions
+  const [siteToast, setSiteToast] = useState<{
+    type: 'error' | 'success';
+    message: string;
+  } | null>(null);
 
   // Standalone fallback state if onSiteCreatedAndConnect isn't supplied
   const [activeConnectCard, setActiveConnectCard] = useState<{
@@ -421,6 +444,112 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
     }
   };
 
+  const showToast = (type: 'error' | 'success', message: string) => {
+    setSiteToast({ type, message });
+    setTimeout(() => {
+      setSiteToast((prev) => (prev?.message === message ? null : prev));
+    }, 4000);
+  };
+
+  const handleOpenRenameModal = (site: AdminSiteSummaryItem) => {
+    setEditingSite(site);
+    setRenameInput(site.name);
+    setSiteToast(null);
+  };
+
+  const handleRenameSiteSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSite || renamingSite) return;
+
+    const trimmedName = renameInput.trim();
+    if (!trimmedName) {
+      showToast('error', 'Please enter a valid site name.');
+      return;
+    }
+
+    setRenamingSite(true);
+    try {
+      const res = await authFetch(`/api/sites/${encodeURIComponent(editingSite.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmedName }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        showToast('error', data?.error?.message || 'Failed to rename site. Please try again.');
+        return;
+      }
+
+      const updatedName = data?.site?.name || data?.name || trimmedName;
+
+      setAdminSites((prev) =>
+        prev.map((s) => (s.id === editingSite.id ? { ...s, name: updatedName } : s))
+      );
+      setBilling((prev) =>
+        prev
+          ? {
+              ...prev,
+              sites: prev.sites.map((s) =>
+                s.id === editingSite.id ? { ...s, name: updatedName } : s
+              ),
+            }
+          : prev
+      );
+
+      onSiteRenamed?.(editingSite.id, updatedName);
+      setEditingSite(null);
+      setRenameInput('');
+      showToast('success', `Renamed site to "${updatedName}".`);
+    } catch {
+      showToast('error', 'Network error while renaming site. Please try again.');
+    } finally {
+      setRenamingSite(false);
+    }
+  };
+
+  const handleOpenDeleteConfirm = (site: AdminSiteSummaryItem) => {
+    setDeletingSiteTarget(site);
+    setSiteToast(null);
+  };
+
+  const handleConfirmDeleteSite = async () => {
+    if (!deletingSiteTarget || deletingSite) return;
+
+    const target = deletingSiteTarget;
+    setDeletingSite(true);
+    try {
+      const res = await authFetch(`/api/sites/${encodeURIComponent(target.id)}`, {
+        method: 'DELETE',
+      });
+
+      if (!res.ok && res.status !== 204) {
+        const data = await res.json().catch(() => null);
+        showToast('error', data?.error?.message || 'Failed to delete site. Please try again.');
+        return;
+      }
+
+      setAdminSites((prev) => prev.filter((s) => s.id !== target.id));
+      setBilling((prev) => {
+        if (!prev) return prev;
+        const remaining = prev.sites.filter((s) => s.id !== target.id);
+        return {
+          ...prev,
+          sites: remaining,
+          totalMonthlyNzd: (remaining.length * 29).toFixed(2),
+        };
+      });
+
+      onSiteDeleted?.(target.id);
+      setDeletingSiteTarget(null);
+      showToast('success', `Deleted site "${target.name}".`);
+    } catch {
+      showToast('error', 'Network error while deleting site. Please try again.');
+    } finally {
+      setDeletingSite(false);
+    }
+  };
+
   const handleToggleEmailAlerts = async (userItem: OrganisationUserItem) => {
     const nextVal = !userItem.emailAlerts;
     setTogglingUserIds((prev) => ({ ...prev, [userItem.id]: true }));
@@ -558,7 +687,7 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
             style={{ background: 'var(--accent-blue)' }}
           >
             <Plus className="w-4 h-4" />
-            <span>Add site</span>
+            <span>Add New Site</span>
           </button>
         </div>
 
@@ -641,6 +770,34 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
           </form>
         )}
 
+        {siteToast && (
+          <div
+            role="alert"
+            className={`rounded-2xl border px-4 py-3 flex items-center justify-between gap-3 text-xs sm:text-sm font-medium shadow-2xs ${
+              siteToast.type === 'error'
+                ? 'bg-rose-50/90 border-rose-200 text-rose-800'
+                : 'bg-emerald-50/90 border-emerald-200 text-emerald-800'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              {siteToast.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              )}
+              <span>{siteToast.message}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSiteToast(null)}
+              className="p-1 rounded-lg hover:bg-black/5 transition-colors cursor-pointer"
+              aria-label="Dismiss notification"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {loading && adminSites.length === 0 ? (
           <div className="bg-white/75 rounded-2xl border border-black/[0.06] p-6 flex items-center gap-3">
             <div className="w-5 h-5 rounded-full border-2 border-teal-500 border-t-transparent animate-spin" />
@@ -665,9 +822,9 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-black/[0.05]">
+                <div className="flex flex-wrap items-center gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-black/[0.05]">
                   {site.agentConnected ? (
-                    <div className="flex items-center gap-2 text-xs font-medium text-slate-700 tabular-nums">
+                    <div className="flex items-center gap-2 text-xs font-medium text-slate-700 tabular-nums mr-1">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                       <span className="font-semibold text-emerald-800">Connected</span>
                       {site.agentLastSeenAt && (
@@ -680,7 +837,7 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
                       )}
                     </div>
                   ) : (
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5 mr-1">
                       <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
                         <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0" />
                         <span className="font-semibold text-slate-700">Not connected</span>
@@ -710,6 +867,24 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
                       )}
                     </div>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenRenameModal(site)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 transition-colors cursor-pointer"
+                  >
+                    <Pencil className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Rename</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDeleteConfirm(site)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-700 bg-rose-50/80 hover:bg-rose-100/80 border border-rose-200 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                    <span>Remove Site</span>
+                  </button>
                 </div>
               </div>
             ))}
@@ -1160,6 +1335,113 @@ export const AccountSettingsTab: React.FC<AccountSettingsTabProps> = ({
           </div>
         )}
       </section>
+
+      {/* Rename site modal */}
+      {editingSite && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-900">Rename site</h3>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!renamingSite) setEditingSite(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                aria-label="Close rename modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRenameSiteSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="rename-site-input"
+                  className="block text-xs font-semibold text-slate-700"
+                >
+                  Site name
+                </label>
+                <input
+                  id="rename-site-input"
+                  type="text"
+                  required
+                  autoFocus
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  disabled={renamingSite}
+                  placeholder="Enter new site name"
+                  className="w-full px-3.5 py-2.5 rounded-xl text-sm text-slate-900 bg-white border border-slate-200 focus:outline-hidden focus:border-sky-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  disabled={renamingSite}
+                  onClick={() => setEditingSite(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200/80 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={renamingSite || !renameInput.trim()}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-white transition-all cursor-pointer disabled:opacity-50"
+                  style={{ background: 'var(--accent-blue)' }}
+                >
+                  {renamingSite ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete site confirmation modal */}
+      {deletingSiteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Are you sure?</h3>
+                <p className="text-xs sm:text-sm text-slate-600 mt-1">
+                  Delete <span className="font-semibold text-slate-900">{deletingSiteTarget.name}</span> from your active sites list? Historical readings and alerts will be kept for archive.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!deletingSite) setDeletingSiteTarget(null);
+                }}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                aria-label="Close delete confirmation"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={deletingSite}
+                onClick={() => setDeletingSiteTarget(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200/80 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deletingSite}
+                onClick={handleConfirmDeleteSite}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {deletingSite ? 'Removing...' : 'Remove Site'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

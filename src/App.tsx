@@ -101,14 +101,16 @@ export default function App() {
         if (data.organisation?.name) {
           setOrganisationName(data.organisation.name);
         }
-        if (Array.isArray(data.sites) && data.sites.length > 0) {
+        if (Array.isArray(data.sites)) {
           setSites(data.sites);
-          setSelectedSiteId((prev) => {
-            const exists = data.sites.some((s: SiteOption) => s.id === prev);
-            const nextId = exists ? prev : data.sites[0].id;
-            localStorage.setItem('signalbloom_selected_site_id', nextId);
-            return nextId;
-          });
+          if (data.sites.length > 0) {
+            setSelectedSiteId((prev) => {
+              const exists = data.sites.some((s: SiteOption) => s.id === prev);
+              const nextId = exists ? prev : data.sites[0].id;
+              localStorage.setItem('signalbloom_selected_site_id', nextId);
+              return nextId;
+            });
+          }
         }
         setIsSampleData(Boolean(data.sampleData));
       }
@@ -286,6 +288,22 @@ export default function App() {
                 });
                 handleSelectSite(site.id);
                 setCurrentTab('health');
+                void fetchShellData();
+              }}
+              onSiteRenamed={(renamedId, newName) => {
+                setSites((prev) =>
+                  prev.map((s) => (s.id === renamedId ? { ...s, name: newName } : s))
+                );
+                void fetchShellData();
+              }}
+              onSiteDeleted={(deletedId) => {
+                setSites((prev) => {
+                  const remaining = prev.filter((s) => s.id !== deletedId);
+                  if (selectedSiteId === deletedId && remaining.length > 0) {
+                    handleSelectSite(remaining[0].id);
+                  }
+                  return remaining;
+                });
                 void fetchShellData();
               }}
             />

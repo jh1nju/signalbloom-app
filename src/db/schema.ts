@@ -75,6 +75,7 @@ export const sites = pgTable('sites', {
   planName: text('plan_name').notNull(),
   monthlyPriceNzd: numeric('monthly_price_nzd', { precision: 10, scale: 2 }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 });
 
 // ---------------------------------------------------------------------------

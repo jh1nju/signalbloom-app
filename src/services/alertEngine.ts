@@ -756,7 +756,10 @@ export async function evaluateAlertsForSite(siteId: string): Promise<void> {
 
 export async function evaluateAlertsForAllSites(): Promise<void> {
   try {
-    const allSites = await db.select({ id: sites.id }).from(sites);
+    const allSites = await db
+      .select({ id: sites.id })
+      .from(sites)
+      .where(isNull(sites.deletedAt));
     for (const s of allSites) {
       await evaluateAlertsForSite(s.id);
     }
@@ -791,7 +794,7 @@ export async function runDevSampleTick(): Promise<void> {
       return;
     }
 
-    const allSites = await db.select().from(sites);
+    const allSites = await db.select().from(sites).where(isNull(sites.deletedAt));
     const now = new Date();
     const isBandwidthTick = now.getMinutes() % 15 === 0 && now.getSeconds() < 30;
 

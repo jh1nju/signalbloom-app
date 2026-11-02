@@ -103,6 +103,7 @@ async function getAdminSitesWithStatus(): Promise<AdminSiteSummary[]> {
       monthlyPriceNzd: sites.monthlyPriceNzd,
     })
     .from(sites)
+    .where(isNull(sites.deletedAt))
     .orderBy(sites.name);
 
   // Never select tokenHash from agents
@@ -241,6 +242,7 @@ appShellRouter.get('/app-shell', requireAuth, async (req: AuthenticatedRequest, 
         monthlyPriceNzd: sites.monthlyPriceNzd,
       })
       .from(sites)
+      .where(isNull(sites.deletedAt))
       .orderBy(sites.name);
 
     const sanitizedSites = allSites.map((s) =>
@@ -363,6 +365,7 @@ appShellRouter.get(
           monthlyPriceNzd: sites.monthlyPriceNzd,
         })
         .from(sites)
+        .where(isNull(sites.deletedAt))
         .orderBy(sites.name);
 
       const normalizedSites = allSites.map((s) => ({
@@ -471,6 +474,127 @@ appShellRouter.post(
         error: {
           code: 'server_error',
           message: 'Could not create site.',
+        },
+      });
+    }
+  }
+);
+
+const SITE_UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// PUT /api/sites/:id (Admin only — returns 403 for staff)
+// Renames an active site: SET name = ? WHERE id = ?
+appShellRouter.put(
+  '/sites/:id',
+  requireAuth,
+  requireAdmin,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const { name } = req.body || {};
+
+    if (!id || !SITE_UUID_REGEX.test(id)) {
+      return res.status(400).json({
+        error: {
+          code: 'invalid_site_id',
+          message: 'A valid site ID is required.',
+        },
+      });
+    }
+
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({
+        error: {
+          code: 'invalid_body',
+          message: 'Site name is required.',
+        },
+      });
+    }
+
+    try {
+      const [updated] = await db
+        .update(sites)
+        .set({ name: name.trim() })
+        .where(and(eq(sites.id, id), isNull(sites.deletedAt)))
+        .returning();
+
+      if (!updated) {
+        return res.status(404).json({
+          error: {
+            code: 'site_not_found',
+            message: 'Site not found.',
+          },
+        });
+      }
+
+      const updatedSite = {
+        id: updated.id,
+        organisationId: updated.organisationId,
+        name: updated.name,
+        address: updated.address,
+        planName: 'SignalBloom Standard',
+        monthlyPriceNzd: '29.00',
+        createdAt: updated.createdAt,
+        deletedAt: updated.deletedAt,
+      };
+
+      return res.status(200).json({
+        ...updatedSite,
+        site: updatedSite,
+      });
+    } catch (err: any) {
+      console.error('Failed to rename site:', err);
+      return res.status(500).json({
+        error: {
+          code: 'server_error',
+          message: 'Could not rename site.',
+        },
+      });
+    }
+  }
+);
+
+// DELETE /api/sites/:id (Admin only — returns 403 for staff)
+// Soft deletes a site: UPDATE sites SET deleted_at = NOW() WHERE id = ?
+// Readings and alerts are NOT deleted; they are kept for archive.
+appShellRouter.delete(
+  '/sites/:id',
+  requireAuth,
+  requireAdmin,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+
+    if (!id || !SITE_UUID_REGEX.test(id)) {
+      return res.status(400).json({
+        error: {
+          code: 'invalid_site_id',
+          message: 'A valid site ID is required.',
+        },
+      });
+    }
+
+    try {
+      const [deleted] = await db
+        .update(sites)
+        .set({ deletedAt: sql`NOW()` })
+        .where(and(eq(sites.id, id), isNull(sites.deletedAt)))
+        .returning({ id: sites.id });
+
+      if (!deleted) {
+        return res.status(404).json({
+          error: {
+            code: 'site_not_found',
+            message: 'Site not found.',
+          },
+        });
+      }
+
+      return res.status(204).send();
+    } catch (err: any) {
+      console.error('Failed to delete site:', err);
+      return res.status(500).json({
+        error: {
+          code: 'server_error',
+          message: 'Could not delete site.',
         },
       });
     }
