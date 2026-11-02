@@ -28,3 +28,4 @@
 | 2026-10-25 | Google AI Studio (Gemini 4 Argon) | Publishing preparation (alert check on ingest, router recommendation, production guards, sample data removal), production Firebase sign-in, Firestore clean-up, keep-signed-in fix | Published the app, connected the real agent and ran the full demo on the live URL |
 | 2026-10-25 | Claude Code | Finished the agent change: an approved fix clears the demo fault (except clear_by_fix) | Ran all tests and the live demo |
 | 2026-10-25 | Claude (claude.ai chat) | Publishing checklist and prompts; diagnosis of the sign-in failure, the unfinished demo-fault change and the leaked-key check; code for clear_by_fix | Ran every check on the live URL; chose the US$5 prepaid cap |
+| 2026-10-25 | Claude Code | Windows exe build: build script, setup-code prompt on first run, exe contents safety check, tests | Ran all 224 tests; checked the exe has no embedded secrets; released it as v1.0-prototype |
